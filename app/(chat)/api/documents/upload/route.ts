@@ -64,13 +64,13 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Check file size (limit to 50MB)
-        const maxSize = 50 * 1024 * 1024; // 50MB
+        // Check file size (limit to 100MB)
+        const maxSize = 100 * 1024 * 1024; // 100MB
         if (fileBuffer.length > maxSize) {
           results.push({
             filename: file.name,
             status: 'error',
-            error: 'File size exceeds 50MB limit',
+            error: 'File size exceeds 100MB limit',
           });
           continue;
         }

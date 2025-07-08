@@ -108,8 +108,8 @@ export function BuildingCodeUploadForm({
       return;
     }
 
-    if (file.size > 50 * 1024 * 1024) { // 50MB limit
-      setError('File size must be less than 50MB');
+    if (file.size > 100 * 1024 * 1024) { // 100MB limit
+      setError('File size must be less than 100MB');
       return;
     }
 
@@ -423,7 +423,7 @@ export function BuildingCodeUploadForm({
                       Drop your building code document here, or click to browse
                     </p>
                     <p className="text-sm text-gray-500">
-                      Supports PDF, TXT, DOC, DOCX (max 50MB)
+                      Supports PDF, TXT, DOC, DOCX (max 100MB)
                     </p>
                   </div>
                 )}

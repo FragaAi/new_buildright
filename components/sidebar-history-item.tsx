@@ -95,9 +95,9 @@ const PureChatItem = ({
             />
           </div>
         ) : (
-          <Link href={`/chat/${chat.id}`} onClick={() => setOpenMobile(false)}>
+        <Link href={`/chat/${chat.id}`} onClick={() => setOpenMobile(false)}>
             <span>{title}</span>
-          </Link>
+        </Link>
         )}
       </SidebarMenuButton>
 

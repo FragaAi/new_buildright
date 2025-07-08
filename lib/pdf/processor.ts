@@ -302,19 +302,19 @@ export class PDFProcessor {
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
         
-        ctx.fillStyle = 'black';
-        ctx.font = '24px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(
+      ctx.fillStyle = 'black';
+      ctx.font = '24px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(
           `Document Page ${pageIndex + 1}`,
-          canvasWidth / 2,
-          canvasHeight / 2
-        );
-        ctx.fillText(
-          `${canvasWidth} x ${canvasHeight} @ ${this.TARGET_DPI} DPI`,
-          canvasWidth / 2,
-          canvasHeight / 2 + 30
-        );
+        canvasWidth / 2,
+        canvasHeight / 2
+      );
+      ctx.fillText(
+        `${canvasWidth} x ${canvasHeight} @ ${this.TARGET_DPI} DPI`,
+        canvasWidth / 2,
+        canvasHeight / 2 + 30
+      );
       }
       
       // Convert to PNG buffer
@@ -424,14 +424,14 @@ export class PDFProcessor {
           const fallbackTexts = [
             { text: 'ARCHITECTURAL DRAWING', x: width * 0.4, y: height * 0.05, fontSize: 16 },
             { text: 'FLOOR PLAN', x: width * 0.45, y: height * 0.1, fontSize: 14 },
-            { text: 'SCALE: 1/4" = 1\'-0"', x: width * 0.05, y: height * 0.95, fontSize: 10 },
-            { text: 'LIVING ROOM', x: width * 0.3, y: height * 0.4, fontSize: 12 },
-            { text: 'KITCHEN', x: width * 0.6, y: height * 0.3, fontSize: 12 },
-            { text: 'BEDROOM', x: width * 0.7, y: height * 0.7, fontSize: 12 },
-            { text: '12\'-6"', x: width * 0.2, y: height * 0.5, fontSize: 10 },
-            { text: '8\'-0"', x: width * 0.5, y: height * 0.8, fontSize: 10 },
-          ];
-          
+          { text: 'SCALE: 1/4" = 1\'-0"', x: width * 0.05, y: height * 0.95, fontSize: 10 },
+          { text: 'LIVING ROOM', x: width * 0.3, y: height * 0.4, fontSize: 12 },
+          { text: 'KITCHEN', x: width * 0.6, y: height * 0.3, fontSize: 12 },
+          { text: 'BEDROOM', x: width * 0.7, y: height * 0.7, fontSize: 12 },
+          { text: '12\'-6"', x: width * 0.2, y: height * 0.5, fontSize: 10 },
+          { text: '8\'-0"', x: width * 0.5, y: height * 0.8, fontSize: 10 },
+        ];
+        
           fallbackTexts.forEach((textInfo) => {
             textElements.push({
               text: textInfo.text,
@@ -671,4 +671,4 @@ Return a JSON object with this structure:
       return 30; // Default to 30 seconds if estimation fails
     }
   }
-}
+} 

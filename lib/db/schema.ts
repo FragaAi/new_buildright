@@ -308,6 +308,9 @@ export const buildingCodeSection = pgTable('building_code_sections', {
   buildingCodeVersionId: uuid('building_code_version_id')
     .notNull()
     .references(() => buildingCodeVersion.id, { onDelete: 'cascade' }),
+  codeType: varchar('code_type', { 
+    enum: ['fbc', 'zoning', 'local'] 
+  }).notNull(),
   sectionNumber: text('section_number').notNull(),
   title: text('title').notNull(),
   content: text('content').notNull(),

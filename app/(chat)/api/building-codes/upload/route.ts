@@ -3,8 +3,7 @@ import { auth } from '@/app/(auth)/auth';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq, and } from 'drizzle-orm';
 import postgres from 'postgres';
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { put } from '@vercel/blob';
 import { 
   buildingCode, 
   buildingCodeVersion, 
@@ -69,22 +68,25 @@ export async function POST(request: NextRequest) {
 
     console.log(`📁 BUILDING CODE UPLOAD: Processing ${file.name} for ${existingCode[0].codeName} v${version}`);
 
-    // Create upload directory if it doesn't exist
-    const uploadDir = join(process.cwd(), 'uploads', 'building-codes');
-    await mkdir(uploadDir, { recursive: true });
-
     // Generate unique filename
     const timestamp = Date.now();
     const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
     const fileName = `${existingCode[0].codeAbbreviation}_${version}_${timestamp}_${sanitizedFileName}`;
-    const filePath = join(uploadDir, fileName);
 
-    // Save file
+    // Save file to Vercel Blob
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-    await writeFile(filePath, buffer);
+    
+    const blob = await put(
+      `building-codes/${existingCode[0].codeAbbreviation}/${version}/${fileName}`,
+      buffer,
+      {
+        access: 'public',
+        contentType: file.type,
+      }
+    );
 
-    console.log(`💾 File saved: ${filePath}`);
+    console.log(`💾 File saved to Vercel Blob: ${blob.url}`);
 
     // Check if version already exists
     const existingVersion = await db
@@ -102,7 +104,7 @@ export async function POST(request: NextRequest) {
       codeVersion = await db
         .update(buildingCodeVersion)
         .set({
-          sourceFile: filePath,
+          sourceFile: blob.url,
           effectiveDate: effectiveDate ? new Date(effectiveDate) : null,
           processingStatus: 'processing',
         })
@@ -116,57 +118,51 @@ export async function POST(request: NextRequest) {
           buildingCodeId,
           version,
           effectiveDate: effectiveDate ? new Date(effectiveDate) : null,
-          sourceFile: filePath,
+          sourceFile: blob.url,
           processingStatus: 'processing',
           isDefault: false, // User can set default later
         })
         .returning();
     }
 
-    // Start processing the file (simplified for now)
+    // Start processing the file
     console.log(`🔄 Starting processing for version: ${codeVersion[0].id}`);
 
-    // TODO: Implement actual file processing logic
-    // This would involve:
-    // 1. OCR/text extraction for PDFs
-    // 2. Parsing code structure (chapters, sections)
-    // 3. Creating building_code_sections entries
-    // 4. Generating embeddings for semantic search
+    try {
+      // Dynamically import to avoid unnecessary bundle size in edge environments
+      const { processBuildingCodeFile } = await import('@/lib/building-codes/parser');
+      await processBuildingCodeFile(blob.url, codeVersion[0].id);
 
-    // For now, create a placeholder section to show the system works
-    if (file.type === 'text/plain') {
-      const textContent = buffer.toString('utf-8');
-      const previewContent = textContent.substring(0, 500) + (textContent.length > 500 ? '...' : '');
-      
-      await db
-        .insert(buildingCodeSection)
-        .values({
-          buildingCodeVersionId: codeVersion[0].id,
-          sectionNumber: '1.0',
-          title: `${existingCode[0].codeName} v${version} - Uploaded Content`,
-          content: previewContent,
-          chapter: '1',
-          hierarchy: JSON.stringify(['Chapter 1', 'Section 1.0']),
-          keywords: JSON.stringify(['uploaded', 'content', existingCode[0].codeAbbreviation.toLowerCase()]),
-        });
-
-      // Update processing status to completed for text files
+      // Update processing status to completed
       await db
         .update(buildingCodeVersion)
         .set({ processingStatus: 'completed' })
         .where(eq(buildingCodeVersion.id, codeVersion[0].id));
+
+      console.log(`✅ Building Code Upload & Processing Complete: ${codeVersion[0].id}`);
+
+      return NextResponse.json({
+        message: 'Building code uploaded and processed successfully',
+        version: { ...codeVersion[0], processingStatus: 'completed' },
+        buildingCode: existingCode[0],
+        fileName,
+        fileSize: file.size,
+        processingStatus: 'completed',
+      });
+    } catch (processingError) {
+      console.error('Processing error:', processingError);
+
+      // Mark as failed
+      await db
+        .update(buildingCodeVersion)
+        .set({ processingStatus: 'failed' })
+        .where(eq(buildingCodeVersion.id, codeVersion[0].id));
+
+      return NextResponse.json(
+        { error: 'File uploaded but processing failed', details: processingError instanceof Error ? processingError.message : String(processingError) },
+        { status: 500 },
+      );
     }
-
-    console.log(`✅ Building Code Upload Complete: ${codeVersion[0].id}`);
-
-    return NextResponse.json({
-      message: 'Building code uploaded successfully',
-      version: codeVersion[0],
-      buildingCode: existingCode[0],
-      fileName,
-      fileSize: file.size,
-      processingStatus: file.type === 'text/plain' ? 'completed' : 'processing',
-    });
 
   } catch (error) {
     console.error('Building code upload error:', error);

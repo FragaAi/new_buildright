@@ -7,7 +7,24 @@ import { CodeBlock } from './code-block';
 const components: Partial<Components> = {
   // @ts-expect-error
   code: CodeBlock,
-  pre: ({ children }) => <>{children}</>,
+  pre: ({ children, ...props }) => {
+    // For pre blocks, we want to handle them properly to avoid p tag wrapping
+    return <div className="not-prose">{children}</div>;
+  },
+  // Ensure paragraphs don't wrap code blocks
+  p: ({ children, ...props }) => {
+    // Check if children contains code blocks
+    const hasCodeBlock = React.Children.toArray(children).some(
+      (child) => React.isValidElement(child) && child.type === CodeBlock
+    );
+    
+    if (hasCodeBlock) {
+      // If paragraph contains code blocks, render as div to avoid nesting issues
+      return <div {...props}>{children}</div>;
+    }
+    
+    return <p {...props}>{children}</p>;
+  },
   ol: ({ node, children, ...props }) => {
     return (
       <ol className="list-decimal list-outside ml-4" {...props}>

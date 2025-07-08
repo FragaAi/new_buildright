@@ -142,27 +142,27 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
 
   return (
     <>
-      <div className={cn(
-        'fixed inset-y-0 right-0 z-50 flex h-full w-80 flex-col border-l bg-background transition-transform duration-200 ease-in-out',
-        open ? 'translate-x-0' : 'translate-x-full'
-      )}>
-        {/* Header */}
+    <div className={cn(
+      'fixed inset-y-0 right-0 z-50 flex h-full w-80 flex-col border-l bg-background transition-transform duration-200 ease-in-out',
+      open ? 'translate-x-0' : 'translate-x-full'
+    )}>
+      {/* Header */}
         <div className="border-b">
           <div className="flex h-14 items-center justify-between px-4">
-            <div className="flex items-center gap-2">
-              <FileText size={16} />
+        <div className="flex items-center gap-2">
+          <FileText size={16} />
               <span className="font-medium">Project Analysis</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggle}
-              className="h-8 w-8 p-0"
-            >
-              <X size={16} />
-            </Button>
-          </div>
-          
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={toggle}
+          className="h-8 w-8 p-0"
+        >
+          <X size={16} />
+        </Button>
+      </div>
+
           {/* Tab Navigation */}
           <div className="flex">
             <Button
@@ -186,67 +186,67 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
 
         {/* Upload Section - Only show for documents tab */}
         {activeTab === 'documents' && (
-          <div className="border-b p-4">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              multiple
-              onChange={handleFileUpload}
-              className="hidden"
-            />
-            <Button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading || !chatId}
-              className="w-full"
-              variant="outline"
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Uploading...
-                </>
-              ) : (
-                <>
-                  <Upload className="mr-2 h-4 w-4" />
-                  Upload PDFs
-                </>
-              )}
-            </Button>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Upload architectural plans, specifications, and other project documents
-            </p>
-          </div>
+      <div className="border-b p-4">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf"
+          multiple
+          onChange={handleFileUpload}
+          className="hidden"
+        />
+        <Button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || !chatId}
+          className="w-full"
+          variant="outline"
+        >
+          {uploading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Uploading...
+            </>
+          ) : (
+            <>
+              <Upload className="mr-2 h-4 w-4" />
+              Upload PDFs
+            </>
+          )}
+        </Button>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Upload architectural plans, specifications, and other project documents
+        </p>
+      </div>
         )}
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto">
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto">
           {activeTab === 'documents' ? (
-            <div className="p-4">
-              {loading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                </div>
-              ) : documents.length === 0 ? (
-                <div className="space-y-4">
-                  <div className="rounded-lg border-2 border-dashed border-muted-foreground/25 p-8 text-center">
-                    <FileText className="mx-auto h-12 w-12 text-muted-foreground/50" />
-                    <h3 className="mt-4 text-lg font-medium">No documents uploaded</h3>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      Upload PDF documents to analyze architectural drawings and check building code compliance
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <h4 className="text-sm font-medium text-muted-foreground">
-                    Uploaded Documents ({documents.length})
-                  </h4>
-                  {documents.map((doc) => (
-                    <div
-                      key={doc.id}
+        <div className="p-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : documents.length === 0 ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border-2 border-dashed border-muted-foreground/25 p-8 text-center">
+                <FileText className="mx-auto h-12 w-12 text-muted-foreground/50" />
+                <h3 className="mt-4 text-lg font-medium">No documents uploaded</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Upload PDF documents to analyze architectural drawings and check building code compliance
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-muted-foreground">
+                Uploaded Documents ({documents.length})
+              </h4>
+              {documents.map((doc) => (
+                <div
+                  key={doc.id}
                       className="rounded-lg border p-3 hover:bg-muted/50 transition-colors"
-                    >
+                >
                       <div className="flex items-start gap-3">
                         {/* Thumbnail */}
                         <div className="flex-shrink-0">
@@ -273,30 +273,30 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
                               )}
                             </div>
                           )}
-                        </div>
+                  </div>
 
                         {/* Document Info */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
                                 {doc.originalFilename}
-                              </p>
+                    </p>
                               <div className="flex items-center gap-2 mt-1">
                                 {getStatusIcon(doc.uploadStatus)}
                                 <span className="text-xs text-muted-foreground">
-                                  {getStatusText(doc.uploadStatus)}
+                      {getStatusText(doc.uploadStatus)}
                                 </span>
                               </div>
                               {doc.uploadStatus === 'ready' && (
                                 <p className="text-xs text-muted-foreground mt-1">
                                   {doc.pageCount} page{doc.pageCount !== 1 ? 's' : ''}
-                                </p>
+                    </p>
                               )}
-                              <p className="text-xs text-muted-foreground">
-                                {new Date(doc.createdAt).toLocaleDateString()}
-                              </p>
-                            </div>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(doc.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
                             
                             {/* View Button */}
                             {doc.uploadStatus === 'ready' && doc.pageCount > 0 && (

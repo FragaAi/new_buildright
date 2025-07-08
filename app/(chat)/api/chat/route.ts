@@ -151,6 +151,19 @@ export async function POST(request: Request) {
         console.log('🔑 API Key exists:', !!process.env.GOOGLE_GENERATIVE_AI_API_KEY);
         console.log('📨 Message count:', messages.length);
         
+        // Log if this might be a document-related query
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage?.content && typeof lastMessage.content === 'string') {
+          const documentKeywords = ['document', 'upload', 'file', 'plan', 'drawing', 'pdf', 'what can you tell me'];
+          const isDocumentQuery = documentKeywords.some(keyword => 
+            lastMessage.content.toLowerCase().includes(keyword.toLowerCase())
+          );
+          if (isDocumentQuery) {
+            console.log('🔍 DETECTED DOCUMENT-RELATED QUERY - AI should use semanticSearch tool');
+            console.log('📋 Query:', lastMessage.content);
+          }
+        }
+        
         const result = streamText({
           model: myProvider.languageModel(selectedChatModel),
           system: systemPrompt({ selectedChatModel, requestHints }),
@@ -176,7 +189,7 @@ export async function POST(request: Request) {
               session,
               dataStream,
             }),
-            semanticSearch: semanticSearchTool({ chatId: id }),
+            semanticSearch: semanticSearchTool({ chatId: id, session }),
           },
           onFinish: async ({ response }) => {
             console.log('✅ Stream finished successfully');
