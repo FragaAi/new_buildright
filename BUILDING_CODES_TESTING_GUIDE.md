@@ -31,7 +31,7 @@ Based on the successful patterns from the OCR Fraga project, the building codes 
 ### Prerequisites
 1. **Environment Variables**:
    ```bash
-   GOOGLE_GENERATIVE_AI_API_KEY=AIzaSyAqF0wP6PmMIxK0zyUOqMH424G1CnOoZ50
+   GOOGLE_GENERATIVE_AI_API_KEY=
    POSTGRES_URL=<your-neon-database-url>
    BLOB_READ_WRITE_TOKEN=<your-vercel-blob-token>
    ```
