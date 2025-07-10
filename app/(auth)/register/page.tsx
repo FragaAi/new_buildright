@@ -87,7 +87,7 @@ export default function Page() {
             <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1">
               <div className="font-semibold">PROJECT: New Construction</div>
               <div>DRAWING: Site Plan</div>
-              <div>SCALE: 1/4" = 1'-0"</div>
+              <div>SCALE: 1/4&quot; = 1&apos;-0&quot;</div>
               <div>DATE: {new Date().toLocaleDateString()}</div>
             </div>
           </div>
