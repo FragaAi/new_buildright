@@ -463,6 +463,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Chat ID is required' }, { status: 400 });
     }
 
+    console.log(`📋 PDF Sidebar - Fetching documents for chat: ${chatId}`);
+
     // Get all documents for this chat with their processing status and page thumbnails
     const documentsWithPages = await db
       .select({
@@ -489,6 +491,8 @@ export async function GET(request: NextRequest) {
       .leftJoin(documentPage, eq(projectDocument.id, documentPage.documentId))
       .where(eq(projectDocument.chatId, chatId))
       .orderBy(projectDocument.createdAt, documentPage.pageNumber);
+
+    console.log(`📊 PDF Sidebar - Raw query returned ${documentsWithPages.length} rows`);
 
     // Group the results by document
     const documentsMap = new Map();
@@ -519,18 +523,20 @@ export async function GET(request: NextRequest) {
       
       // Add page information if it exists
       if (row.pageId) {
+        const pageNumber = parseInt(row.pageNumber || '0');
         doc.pages.push({
           id: row.pageId,
-          pageNumber: parseInt(row.pageNumber || '0'),
+          pageNumber: pageNumber,
           pageType: row.pageType,
           imageUrl: row.imageUrl,
           thumbnailUrl: row.thumbnailUrl,
           dimensions: row.dimensions,
         });
         
-        // Use first page thumbnail as document thumbnail
-        if (!doc.firstPageThumbnail && row.thumbnailUrl) {
+        // Set first page thumbnail (page 1) as document thumbnail
+        if (pageNumber === 1 && row.thumbnailUrl) {
           doc.firstPageThumbnail = row.thumbnailUrl;
+          console.log(`🖼️ PDF Sidebar - Set thumbnail for ${doc.originalFilename}: ${row.thumbnailUrl}`);
         }
       }
     }
@@ -542,6 +548,11 @@ export async function GET(request: NextRequest) {
       // Sort pages by page number
       pages: doc.pages.sort((a: any, b: any) => a.pageNumber - b.pageNumber),
     }));
+
+    console.log(`📋 PDF Sidebar - Received documents: ${documents.length}`);
+    documents.forEach(doc => {
+      console.log(`📄 ${doc.originalFilename} - Status: ${doc.uploadStatus}, Pages: ${doc.pageCount}, Thumbnail: ${doc.firstPageThumbnail ? 'YES' : 'NO'}`);
+    });
 
     return NextResponse.json({
       documents,
