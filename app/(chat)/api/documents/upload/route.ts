@@ -189,15 +189,22 @@ async function processDocumentInBackground(
 
       // Save visual elements (detected by Gemini Vision)
       if (page.visualElements && page.visualElements.length > 0) {
-        const visualElementInserts = page.visualElements.map((element) => ({
-          id: generateUUID(),
-          pageId: dbPage.id,
-          elementType: element.type,
-          boundingBox: element.boundingBox,
-          confidence: element.confidence.toString(), // Convert to string
-          properties: element.properties || {},
-          textContent: element.textContent || null,
-        }));
+        const visualElementInserts = page.visualElements.map((element) => {
+          // Map element types to database schema
+          const dbElementType = element.type === 'structural_element' ? 'other' : 
+                               element.type === 'room_label' ? 'room' : 
+                               element.type;
+          
+          return {
+            id: generateUUID(),
+            pageId: dbPage.id,
+            elementType: dbElementType as 'dimension' | 'wall' | 'door' | 'window' | 'room' | 'symbol' | 'text_annotation' | 'callout' | 'grid_line' | 'other',
+            boundingBox: element.coordinates,
+            confidence: element.confidence?.toString() || '0.5',
+            properties: element.properties || {},
+            textContent: element.textContent || null,
+          };
+        });
         
         await db.insert(visualElement).values(visualElementInserts);
         console.log(`📐 Saved ${visualElementInserts.length} visual elements for page ${page.pageNumber}`);
@@ -211,15 +218,15 @@ async function processDocumentInBackground(
           pageId: dbPage.id,
           elementType: 'text_annotation' as const,
           boundingBox: {
-            x: textEl.x,
-            y: textEl.y,
-            width: textEl.width,
-            height: textEl.height,
+            x: textEl.coordinates.x,
+            y: textEl.coordinates.y,
+            width: textEl.coordinates.width,
+            height: textEl.coordinates.height,
           },
           confidence: '0.95', // High confidence for extracted text
           properties: {
             fontSize: textEl.fontSize,
-            fontName: textEl.fontName,
+            fontFamily: textEl.fontFamily,
             source: 'text_extraction',
           },
           textContent: textEl.text,
@@ -249,13 +256,13 @@ async function processDocumentInBackground(
                 measurementType: 'length' as const,
                 value: (totalInches / 12).toString(), // Convert to feet
                 unit: 'ft' as const,
-                fromCoordinates: { x: element.boundingBox.x, y: element.boundingBox.y },
+                fromCoordinates: { x: element.coordinates.x, y: element.coordinates.y },
                 toCoordinates: { 
-                  x: element.boundingBox.x + element.boundingBox.width, 
-                  y: element.boundingBox.y 
+                  x: element.coordinates.x + element.coordinates.width, 
+                  y: element.coordinates.y 
                 },
                 annotationText: element.textContent,
-                confidence: element.confidence.toString(),
+                confidence: element.confidence?.toString() || '0.5',
               });
             }
           }
@@ -357,8 +364,8 @@ async function generateEmbeddingsForPage(
       for (const element of page.visualElements) {
         if (element.textContent || element.type) {
           const elementDescription = element.textContent 
-            ? `Architectural ${element.type}: ${element.textContent} at coordinates ${element.boundingBox.x},${element.boundingBox.y}`
-            : `Architectural ${element.type} element detected at coordinates ${element.boundingBox.x},${element.boundingBox.y}`;
+            ? `Architectural ${element.type}: ${element.textContent} at coordinates ${element.coordinates.x},${element.coordinates.y}`
+            : `Architectural ${element.type} element detected at coordinates ${element.coordinates.x},${element.coordinates.y}`;
 
           console.log(`🏗️ Generating visual embedding for: "${elementDescription}"`);
           
@@ -366,24 +373,24 @@ async function generateEmbeddingsForPage(
             const visualEmbeddingResult = await embeddingModel.embedContent(elementDescription);
             const visualEmbedding = visualEmbeddingResult.embedding.values;
             
-            embeddingInserts.push({
-              id: generateUUID(),
-              pageId,
-              contentType: 'visual' as const,
-              chunkDescription: elementDescription,
-              embedding: JSON.stringify(visualEmbedding), // Store actual vector
-              boundingBox: element.boundingBox,
-              metadata: {
-                pageNumber: page.pageNumber,
-                elementType: element.type,
-                confidence: element.confidence,
-                properties: element.properties,
-                source: 'gemini_vision',
-                chatId,
-                searchableText: elementDescription,
-                embeddingDimensions: visualEmbedding.length,
-              },
-            });
+                          embeddingInserts.push({
+                id: generateUUID(),
+                pageId,
+                contentType: 'visual' as const,
+                chunkDescription: elementDescription,
+                embedding: JSON.stringify(visualEmbedding), // Store actual vector
+                boundingBox: element.coordinates,
+                metadata: {
+                  pageNumber: page.pageNumber,
+                  elementType: element.type,
+                  confidence: element.confidence,
+                  properties: element.properties,
+                  source: 'gemini_vision',
+                  chatId,
+                  searchableText: elementDescription,
+                  embeddingDimensions: visualEmbedding.length,
+                },
+              });
             
             console.log(`✅ Visual embedding generated for ${element.type}: ${visualEmbedding.length} dimensions`);
           } catch (visualEmbedError) {
