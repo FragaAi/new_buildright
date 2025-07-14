@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
         const blobPath = `documents/${chatId}/${timestamp}_${filename}`;
 
         const { url } = await put(blobPath, fileBuffer, {
-          access: 'public',
+            access: 'public',
           contentType: file.type,
         });
 
@@ -70,13 +70,13 @@ export async function POST(request: NextRequest) {
         const documentId = generateUUID();
         await db.insert(projectDocument).values({
           id: documentId,
-          chatId,
+            chatId,
           filename: filename,
-          originalFilename: file.name,
+            originalFilename: file.name,
           fileUrl: url,
-          fileSize: fileBuffer.length.toString(),
-          mimeType: file.type,
-          uploadStatus: 'uploading',
+            fileSize: fileBuffer.length.toString(),
+            mimeType: file.type,
+            uploadStatus: 'uploading',
           createdAt: new Date(),
           updatedAt: new Date(),
         });
@@ -126,14 +126,14 @@ async function processDocumentInBackground(
   try {
     console.log(`🚀 Starting NotebookLM-style processing for document ${documentId} (${filename})`);
     
-    // Update status to 'processing'
-    await db
-      .update(projectDocument)
-      .set({ 
-        uploadStatus: 'processing',
-        updatedAt: new Date(),
-      })
-      .where(eq(projectDocument.id, documentId));
+            // Update status to 'processing'
+        await db
+          .update(projectDocument)
+          .set({ 
+            uploadStatus: 'processing',
+            updatedAt: new Date(),
+          })
+          .where(eq(projectDocument.id, documentId));
 
     console.log(`📊 Updated document ${documentId} status to 'processing'`);
 
@@ -192,13 +192,13 @@ async function processDocumentInBackground(
     
     // Update status to 'failed'
     try {
-      await db
-        .update(projectDocument)
-        .set({ 
-          uploadStatus: 'failed',
-          updatedAt: new Date(),
-        })
-        .where(eq(projectDocument.id, documentId));
+    await db
+      .update(projectDocument)
+      .set({ 
+        uploadStatus: 'failed',
+        updatedAt: new Date(),
+      })
+      .where(eq(projectDocument.id, documentId));
       console.log(`📊 Updated document ${documentId} status to 'failed'`);
     } catch (updateError) {
       console.error(`❌ Failed to update document status to 'failed' for ${documentId}:`, updateError);
@@ -220,7 +220,7 @@ async function generateEmbeddingsForPage(
       console.log(`⚠️ No text content for page ${page.pageNumber}, skipping embedding generation`);
       return;
     }
-
+    
     // Import Google's official Generative AI SDK
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     
@@ -302,7 +302,7 @@ Extract the key facts and details:`;
               extractionMethod: 'specific_facts'
             },
           });
-
+          
           console.log(`💾 Saved embedding for specific fact ${factIndex + 1}/${extractedFacts.length}: "${fact.substring(0, 80)}..."`);
 
         } catch (embeddingError) {
@@ -350,13 +350,13 @@ Provide a specific, factual description (not a generic summary):`;
 
           // Save to database
           await db.insert(multimodalEmbedding).values({
-            id: generateUUID(),
+              id: generateUUID(),
             pageId: pageId,
             contentType: 'textual',
             chunkDescription: chunkDescription,
             embedding: JSON.stringify(embedding),
-            metadata: {
-              pageNumber: page.pageNumber,
+              metadata: {
+                pageNumber: page.pageNumber,
               source: 'enhanced_semantic_chunking',
               embeddingDimensions: embedding.length,
               chatId: chatId,
@@ -364,9 +364,9 @@ Provide a specific, factual description (not a generic summary):`;
               totalChunks: chunks.length,
               chunkLength: chunk.length,
               extractionMethod: 'enhanced_chunks'
-            },
-          });
-
+              },
+            });
+            
           console.log(`💾 Saved embedding for enhanced chunk ${chunkIndex + 1}/${chunks.length}: "${chunkDescription.substring(0, 80)}..."`);
 
         } catch (embeddingError) {

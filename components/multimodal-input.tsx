@@ -16,7 +16,7 @@ import {
 import { toast } from 'sonner';
 import { useLocalStorage, useWindowSize } from 'usehooks-ts';
 
-import { ArrowUpIcon, PaperclipIcon, StopIcon } from './icons';
+import { ArrowUpIcon, PaperclipIcon, StopIcon, FloridaBuildingCodeIcon, MiamiDadeZoningIcon } from './icons';
 import { PreviewAttachment } from './preview-attachment';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -291,8 +291,10 @@ function PureMultimodalInput({
         }}
       />
 
-      <div className="absolute bottom-0 p-2 w-fit flex flex-row justify-start">
+      <div className="absolute bottom-0 p-2 w-fit flex flex-row justify-start gap-1">
         <AttachmentsButton fileInputRef={fileInputRef} status={status} />
+        <ComplianceButton type="fbc" status={status} append={append} />
+        <ComplianceButton type="miami-dade" status={status} append={append} />
       </div>
 
       <div className="absolute bottom-0 right-0 p-2 w-fit flex flex-row justify-end">
@@ -347,6 +349,47 @@ function PureAttachmentsButton({
 }
 
 const AttachmentsButton = memo(PureAttachmentsButton);
+
+function PureComplianceButton({
+  type,
+  status,
+  append,
+}: {
+  type: 'fbc' | 'miami-dade';
+  status: UseChatHelpers['status'];
+  append: UseChatHelpers['append'];
+}) {
+  const handleComplianceCheck = () => {
+    if (status !== 'ready') return;
+    
+    const complianceType = type === 'fbc' ? 'Florida Building Code' : 'Miami Dade County Zoning';
+    append({
+      role: 'user',
+      content: `Please run a ${complianceType} compliance check on all uploaded documents and plans. Analyze for potential violations, provide specific code citations, and give recommendations for any issues found.`,
+    });
+  };
+
+  const icon = type === 'fbc' ? <FloridaBuildingCodeIcon size={14} /> : <MiamiDadeZoningIcon size={14} />;
+  const title = type === 'fbc' ? 'Florida Building Code Compliance' : 'Miami Dade Zoning Compliance';
+
+  return (
+    <Button
+      data-testid={`${type}-compliance-button`}
+      className="rounded-md p-[7px] h-fit dark:border-zinc-700 hover:dark:bg-zinc-900 hover:bg-zinc-200"
+      onClick={(event) => {
+        event.preventDefault();
+        handleComplianceCheck();
+      }}
+      disabled={status !== 'ready'}
+      variant="ghost"
+      title={title}
+    >
+      {icon}
+    </Button>
+  );
+}
+
+const ComplianceButton = memo(PureComplianceButton);
 
 function PureStopButton({
   stop,

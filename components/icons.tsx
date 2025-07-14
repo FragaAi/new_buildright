@@ -1172,3 +1172,42 @@ export const WarningIcon = ({ size = 16 }: { size?: number }) => {
     </svg>
   );
 };
+
+// Compliance Checking Icons
+export const FloridaBuildingCodeIcon = ({ size = 16 }: { size?: number }) => {
+  return (
+    <svg
+      height={size}
+      strokeLinejoin="round"
+      viewBox="0 0 16 16"
+      width={size}
+      style={{ color: 'currentcolor' }}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M8 1L8.5 1.5V2.5L12 3.5V4.5L8.5 3.5V4.5L12 5.5V6.5L8.5 5.5V6.5L12 7.5V8.5L8.5 7.5V8.5L12 9.5V10.5L8.5 9.5V10.5L12 11.5V12.5L8.5 11.5V12.5H7.5V11.5L4 12.5V11.5L7.5 10.5V9.5L4 10.5V9.5L7.5 8.5V7.5L4 8.5V7.5L7.5 6.5V5.5L4 6.5V5.5L7.5 4.5V3.5L4 4.5V3.5L7.5 2.5V1.5L8 1ZM2 13H14V14H10.5L10 14.5V15H6V14.5L5.5 14H2V13Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};
+
+export const MiamiDadeZoningIcon = ({ size = 16 }: { size?: number }) => {
+  return (
+    <svg
+      height={size}
+      strokeLinejoin="round"
+      viewBox="0 0 16 16"
+      width={size}
+      style={{ color: 'currentcolor' }}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M2 2H14V14H2V2ZM3 3V13H13V3H3ZM4 4H7V7H4V4ZM5 5V6H6V5H5ZM9 4H12V7H9V4ZM10 5V6H11V5H10ZM4 9H7V12H4V9ZM5 10V11H6V10H5ZM9 9H12V12H9V9ZM10 10V11H11V10H10ZM7.5 7.5H8.5V8.5H7.5V7.5Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+};
