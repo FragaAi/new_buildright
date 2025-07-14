@@ -21,13 +21,13 @@ interface SemanticSearchProps {
 
 export const semanticSearchTool = ({ chatId, session }: SemanticSearchProps) =>
   tool({
-    description: '🚨 REQUIRED TOOL: Search through uploaded documents using semantic search. You MUST use this tool FIRST for ANY document-related questions. This is MANDATORY when users ask about their documents, files, or content. Use for general questions like "what can you tell me about the documents uploaded?", "what\'s in my documents?", "tell me about uploaded files", "summarize my documents", as well as specific searches like "find dimensions", "locate kitchen", "structural elements", "building specifications". ALWAYS call this tool before responding to document questions.',
+    description: '🚨 REQUIRED TOOL: Search through uploaded documents using semantic search. You MUST use this tool FIRST for ANY document-related questions. This is MANDATORY when users ask about their documents, files, or content. Use for general questions like "what can you tell me about the documents uploaded?", "what\'s in my documents?", "tell me about uploaded files", "summarize my documents", as well as specific searches like "find dimensions", "locate kitchen", "structural elements", "building specifications". ALWAYS call this tool before responding to document questions. \n\n🔍 FOR COMPREHENSIVE ANALYSIS: When users ask about specific documents (e.g., "What\'s in A-100 Zoning?") or project-wide questions, consider using multiple targeted searches with different keywords to ensure complete coverage (e.g., search for "A-100 zoning setbacks dimensions", then "A-100 property site information", then "A-100 building requirements").',
     parameters: z.object({
       query: z.string().describe('The search query to find relevant content in uploaded documents'),
       contentType: z.enum(['textual', 'visual', 'combined']).optional().default('textual').describe('Type of content to search - textual (text content), visual (architectural elements), or combined. Defaults to textual for PDF documents.'),
-      limit: z.number().optional().default(10).describe('Maximum number of results to return'),
+      limit: z.number().optional().default(15).describe('Maximum number of results to return - increased default for comprehensive analysis'),
     }),
-    execute: async ({ query, contentType = 'textual', limit = 10 }) => {
+    execute: async ({ query, contentType = 'textual', limit = 15 }) => {
       try {
         console.log(`🔍 AI Tool: Semantic search STARTING for "${query}" in chat ${chatId}`);
         console.log(`📋 Parameters:`, { query, contentType, limit, chatId });
@@ -249,13 +249,46 @@ export const semanticSearchTool = ({ chatId, session }: SemanticSearchProps) =>
           }
         }
 
+        // **CRITICAL FOR AI UNDERSTANDING**: Extract and present the actual content
+        let contentSummary = '';
+        if (sortedResults.length > 0) {
+          contentSummary = '\n\n=== DOCUMENT CONTENT FOUND ===\n';
+          contentSummary += `Found ${sortedResults.length} relevant pieces of information. Here are the most relevant results:\n`;
+          
+          // Present MORE results with their actual content for comprehensive analysis
+          const maxResults = Math.min(sortedResults.length, 10); // Show up to 10 results for comprehensive coverage
+          sortedResults.slice(0, maxResults).forEach((result: any, index: number) => {
+            const similarity = (result.similarity * 100).toFixed(1);
+            const filename = result.documentInfo?.filename || 'Unknown document';
+            const pageNum = result.pageInfo?.pageNumber || 'Unknown page';
+            const content = result.chunkDescription || 'No content description';
+            
+            contentSummary += `\n${index + 1}. [${similarity}% match] From ${filename}, page ${pageNum}:\n`;
+            contentSummary += `   ${content}\n`;
+          });
+          
+          if (sortedResults.length > maxResults) {
+            contentSummary += `\n... and ${sortedResults.length - maxResults} additional results available.\n`;
+          }
+          
+          contentSummary += '\n=== END DOCUMENT CONTENT ===\n';
+          contentSummary += '\n🚨 IMPORTANT: Use ALL the above document content to provide a COMPREHENSIVE, DETAILED response. Extract specific measurements, names, addresses, specifications, and technical details. DO NOT provide brief summaries - give complete information that would eliminate the need for follow-up questions.';
+        }
+
         return {
           success: true,
-          message: summary,
+          message: summary + contentSummary,
           results: formattedResults,
           visualContext,
           totalFound: sortedResults.length,
           searchQuery: query,
+          // Add the extracted content directly for AI consumption (more comprehensive)
+          extractedContent: sortedResults.slice(0, 10).map((r: any) => ({
+            content: r.chunkDescription,
+            document: r.documentInfo?.filename,
+            page: r.pageInfo?.pageNumber,
+            similarity: r.similarity,
+          })),
         };
       } catch (error) {
         console.error('Semantic search tool error:', error);
