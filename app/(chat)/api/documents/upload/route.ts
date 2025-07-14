@@ -229,81 +229,156 @@ async function generateEmbeddingsForPage(
     const embeddingModel = genAI.getGenerativeModel({ model: 'text-embedding-004' });
     const analysisModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-    console.log(`🧠 Processing page ${page.pageNumber} for NotebookLM-style embeddings...`);
+    console.log(`🧠 Processing page ${page.pageNumber} for NotebookLM-style detailed content extraction...`);
 
-    // Step 1: Analyze content and generate meaningful description
-    const contentAnalysisPrompt = `Analyze this architectural document text and provide a concise, descriptive summary of its content in 2-3 sentences. Focus on what information this text contains that would be useful for construction and design queries.
+    // Step 1: Extract detailed, specific information from the full text content
+    const detailedExtractionPrompt = `Extract specific, detailed information from this architectural document text. Instead of generic summaries, identify and extract concrete facts, data, and details that would be useful for answering specific questions.
 
-Text content:
-${page.textContent.substring(0, 1500)}...
+Focus on extracting:
+- Specific addresses, locations, property details
+- Exact measurements, dimensions, areas, square footage
+- Room names, spaces, and their specifications
+- Material specifications and building components
+- Code references, compliance information
+- Project details, dates, names, titles
+- Technical specifications and requirements
+- Any other specific factual information
 
-Provide only the summary, no additional formatting:`;
+Format your response as specific, searchable facts rather than generic descriptions. Each fact should be detailed and complete.
 
-    let chunkDescription = `Page ${page.pageNumber} content`;
+Full document text:
+${page.textContent}
+
+Extract the key facts and details:`;
+
+    let extractedFacts: string[] = [];
     try {
-      const analysisResult = await analysisModel.generateContent(contentAnalysisPrompt);
-      const analysisText = analysisResult.response.text();
+      const extractionResult = await analysisModel.generateContent(detailedExtractionPrompt);
+      const extractionText = extractionResult.response.text();
       
-      if (analysisText && analysisText.trim().length > 10) {
-        chunkDescription = analysisText.trim();
-        console.log(`📋 Generated AI description for page ${page.pageNumber}: "${chunkDescription.substring(0, 100)}..."`);
+      if (extractionText && extractionText.trim().length > 10) {
+        // Split the extracted facts into individual chunks
+        extractedFacts = extractionText
+          .split('\n')
+          .map(fact => fact.trim())
+          .filter(fact => fact.length > 20 && !fact.startsWith('-') && !fact.startsWith('•'))
+          .map(fact => fact.replace(/^[\d\.\-\•\*\+]\s*/, '').trim());
+        
+        console.log(`📋 Extracted ${extractedFacts.length} specific facts from page ${page.pageNumber}`);
       }
     } catch (analysisError) {
-      console.warn(`⚠️ Content analysis failed for page ${page.pageNumber}, using fallback description`);
+      console.warn(`⚠️ Detailed content extraction failed for page ${page.pageNumber}, falling back to chunking`);
     }
 
-    // Step 2: Semantic chunking for better embedding quality
-    const chunks = semanticChunkText(page.textContent);
-    console.log(`📄 Created ${chunks.length} semantic chunks for page ${page.pageNumber}`);
+    // Step 2: If fact extraction worked, create embeddings for each fact
+    if (extractedFacts.length > 0) {
+      for (let factIndex = 0; factIndex < extractedFacts.length; factIndex++) {
+        const fact = extractedFacts[factIndex];
+        
+        if (fact.trim().length < 30) {
+          continue; // Skip very short facts
+        }
 
-    // Step 3: Generate embeddings for each chunk
-    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-      const chunk = chunks[chunkIndex];
+        try {
+          // Generate embedding for this specific fact
+          const embeddingResult = await embeddingModel.embedContent(fact);
+          const embedding = embeddingResult.embedding.values;
+
+          // Save to database with the specific fact as description
+          await db.insert(multimodalEmbedding).values({
+            id: generateUUID(),
+            pageId: pageId,
+            contentType: 'textual',
+            chunkDescription: fact,
+            embedding: JSON.stringify(embedding),
+            metadata: {
+              pageNumber: page.pageNumber,
+              source: 'detailed_fact_extraction',
+              embeddingDimensions: embedding.length,
+              chatId: chatId,
+              factIndex: factIndex,
+              totalFacts: extractedFacts.length,
+              factLength: fact.length,
+              extractionMethod: 'specific_facts'
+            },
+          });
+
+          console.log(`💾 Saved embedding for specific fact ${factIndex + 1}/${extractedFacts.length}: "${fact.substring(0, 80)}..."`);
+
+        } catch (embeddingError) {
+          console.error(`❌ Failed to generate embedding for fact ${factIndex + 1}:`, embeddingError);
+        }
+      }
+    } else {
+      // Step 3: Fallback to enhanced semantic chunking if fact extraction fails
+      console.log(`📄 Falling back to enhanced semantic chunking for page ${page.pageNumber}`);
       
-      if (chunk.trim().length < 50) {
-        console.log(`⚠️ Skipping short chunk ${chunkIndex + 1} for page ${page.pageNumber}`);
-        continue;
-      }
+      const chunks = enhancedSemanticChunkText(page.textContent);
+      console.log(`📄 Created ${chunks.length} enhanced semantic chunks for page ${page.pageNumber}`);
 
-      try {
-        // Generate embedding for chunk
-        const embeddingResult = await embeddingModel.embedContent(chunk);
-        const embedding = embeddingResult.embedding.values;
+      for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+        const chunk = chunks[chunkIndex];
+        
+        if (chunk.trim().length < 50) {
+          continue;
+        }
 
-        // Create chunk-specific description
-        const finalDescription = chunks.length > 1 
-          ? `${chunkDescription} (Part ${chunkIndex + 1} of ${chunks.length})`
-          : chunkDescription;
+        try {
+          // Generate more detailed description for this chunk
+          const chunkAnalysisPrompt = `Analyze this text chunk and create a specific, detailed description of what information it contains. Focus on concrete facts, data, and details rather than generic descriptions.
 
-        // Save to database
-        await db.insert(multimodalEmbedding).values({
-          id: generateUUID(),
-          pageId: pageId,
-          contentType: 'textual',
-          chunkDescription: finalDescription,
-          embedding: JSON.stringify(embedding),
-          metadata: {
-            pageNumber: page.pageNumber,
-            source: 'semantic_chunking',
-            embeddingDimensions: embedding.length,
-            chatId: chatId,
-            chunkIndex: chunkIndex,
-            totalChunks: chunks.length,
-            chunkLength: chunk.length,
-          },
-        });
+Text chunk:
+${chunk}
 
-        console.log(`💾 Saved embedding for page ${page.pageNumber}, chunk ${chunkIndex + 1}/${chunks.length}`);
+Provide a specific, factual description (not a generic summary):`;
 
-      } catch (embeddingError) {
-        console.error(`❌ Failed to generate embedding for page ${page.pageNumber}, chunk ${chunkIndex + 1}:`, embeddingError);
+          let chunkDescription = `Page ${page.pageNumber}, section ${chunkIndex + 1} content`;
+          try {
+            const chunkAnalysisResult = await analysisModel.generateContent(chunkAnalysisPrompt);
+            const analysisText = chunkAnalysisResult.response.text();
+            
+            if (analysisText && analysisText.trim().length > 10) {
+              chunkDescription = analysisText.trim();
+            }
+          } catch (chunkAnalysisError) {
+            console.warn(`⚠️ Chunk analysis failed for chunk ${chunkIndex + 1}`);
+          }
+
+          // Generate embedding for chunk
+          const embeddingResult = await embeddingModel.embedContent(chunk);
+          const embedding = embeddingResult.embedding.values;
+
+          // Save to database
+          await db.insert(multimodalEmbedding).values({
+            id: generateUUID(),
+            pageId: pageId,
+            contentType: 'textual',
+            chunkDescription: chunkDescription,
+            embedding: JSON.stringify(embedding),
+            metadata: {
+              pageNumber: page.pageNumber,
+              source: 'enhanced_semantic_chunking',
+              embeddingDimensions: embedding.length,
+              chatId: chatId,
+              chunkIndex: chunkIndex,
+              totalChunks: chunks.length,
+              chunkLength: chunk.length,
+              extractionMethod: 'enhanced_chunks'
+            },
+          });
+
+          console.log(`💾 Saved embedding for enhanced chunk ${chunkIndex + 1}/${chunks.length}: "${chunkDescription.substring(0, 80)}..."`);
+
+        } catch (embeddingError) {
+          console.error(`❌ Failed to generate embedding for chunk ${chunkIndex + 1}:`, embeddingError);
+        }
       }
     }
 
-    console.log(`✅ Completed embedding generation for page ${page.pageNumber} with ${chunks.length} chunks`);
+    console.log(`✅ Completed NotebookLM-style embedding generation for page ${page.pageNumber}`);
 
   } catch (error) {
-    console.error(`Failed to generate embeddings for page ${page.pageNumber}:`, error);
+    console.error(`❌ Failed to generate embeddings for page ${page.pageNumber}:`, error);
   }
 }
 
@@ -366,6 +441,69 @@ function semanticChunkText(text: string): string[] {
   }
 
   return chunks.filter(chunk => chunk.trim().length > 0);
+}
+
+/**
+ * Enhanced semantic chunking for architectural documents
+ * This function is a more sophisticated version that attempts to break down text
+ * into smaller, more semantically meaningful chunks, especially for complex documents.
+ */
+function enhancedSemanticChunkText(text: string): string[] {
+  if (!text || text.length < 100) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  const maxChunkSize = 1000; // Increased max chunk size for more detailed extraction
+  const minChunkSize = 150; // Increased to ensure meaningful content
+  const overlapSize = 100;
+
+  // Enhanced architectural markers for better semantic separation
+  const sections = text.split(/(?=(?:PROPERTY|ADDRESS|LOCATION|PROJECT|ARCHITECT|OWNER|ROOM|FLOOR|PLAN|ELEVATION|SECTION|DETAIL|SCHEDULE|NOTES?|DRAWING|SCALE|DIMENSION|SPECIFICATION|MATERIAL|CODE|COMPLIANCE|AREA|SQUARE|FEET|SIZE))/i);
+  
+  for (const section of sections) {
+    const trimmedSection = section.trim();
+    
+    if (trimmedSection.length <= maxChunkSize) {
+      // Section fits in one chunk
+      if (trimmedSection.length >= minChunkSize) {
+        chunks.push(trimmedSection);
+      } else if (chunks.length > 0) {
+        // Merge small sections with previous chunk
+        chunks[chunks.length - 1] += '\n\n' + trimmedSection;
+      } else {
+        chunks.push(trimmedSection);
+      }
+    } else {
+      // Split large sections with overlap
+      let start = 0;
+      while (start < trimmedSection.length) {
+        let end = Math.min(start + maxChunkSize, trimmedSection.length);
+        
+        // Try to break at sentence boundaries
+        if (end < trimmedSection.length) {
+          const lastSentence = trimmedSection.lastIndexOf('.', end);
+          const lastNewline = trimmedSection.lastIndexOf('\n', end);
+          const breakPoint = Math.max(lastSentence, lastNewline);
+          
+          if (breakPoint > start + minChunkSize) {
+            end = breakPoint + 1;
+          }
+        }
+        
+        const chunk = trimmedSection.substring(start, end).trim();
+        if (chunk.length >= minChunkSize) {
+          chunks.push(chunk);
+        }
+        
+        // Move start position with overlap
+        start = Math.max(end - overlapSize, start + minChunkSize);
+        if (start >= trimmedSection.length) break;
+      }
+    }
+  }
+
+  return chunks.filter(chunk => chunk.trim().length >= minChunkSize);
 }
 
 /**
