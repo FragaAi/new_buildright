@@ -173,20 +173,20 @@ export default function Page() {
               </p>
             </div>
             
-            <AuthForm action={handleSubmit} defaultEmail={email}>
+        <AuthForm action={handleSubmit} defaultEmail={email}>
               <SubmitButton isSuccessful={isSuccessful}>
                 Start Building with BuildRight
               </SubmitButton>
               <p className="text-center text-sm text-slate-600 mt-4 dark:text-slate-400">
-                {'Already have an account? '}
-                <Link
-                  href="/login"
+            {'Already have an account? '}
+            <Link
+              href="/login"
                   className="font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 transition-colors"
-                >
-                  Sign in
-                </Link>
-                {' instead.'}
-              </p>
+            >
+              Sign in
+            </Link>
+            {' instead.'}
+          </p>
               
               <div className="text-center mt-4">
                 <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -194,7 +194,7 @@ export default function Page() {
                   No spam, ever. 🏗️
                 </p>
               </div>
-            </AuthForm>
+        </AuthForm>
           </div>
         </div>
       </div>

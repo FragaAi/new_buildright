@@ -9,6 +9,7 @@ import {
   primaryKey,
   foreignKey,
   boolean,
+  real,
 } from 'drizzle-orm/pg-core';
 
 export const user = pgTable('User', {
@@ -354,3 +355,109 @@ export const complianceCheck = pgTable('compliance_checks', {
 });
 
 export type ComplianceCheck = InferSelectModel<typeof complianceCheck>;
+
+// Enhanced Hierarchical Document System Tables
+
+// Document hierarchy tracking
+export const documentHierarchy = pgTable('document_hierarchy', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  projectId: uuid('project_id').notNull(), // References chat.id for now
+  hierarchyData: json('hierarchy_data').notNull(),
+  documentRelationships: json('document_relationships'),
+  crossReferences: json('cross_references'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export type DocumentHierarchy = InferSelectModel<typeof documentHierarchy>;
+
+// Semantic chunks with hierarchical structure
+export const semanticChunks = pgTable('semantic_chunks', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  documentId: uuid('document_id').notNull().references(() => projectDocument.id, { onDelete: 'cascade' }),
+  parentChunkId: uuid('parent_chunk_id'), // Self-reference handled in migration
+  level: varchar('level', { 
+    enum: ['project', 'document', 'section', 'subsection', 'paragraph'] 
+  }).notNull(),
+  content: text('content').notNull(),
+  context: json('context'),
+  metadata: json('metadata'),
+  embedding: text('embedding'), // JSON string for now, like existing embeddings
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type SemanticChunk = InferSelectModel<typeof semanticChunks>;
+
+// Multi-level embeddings for different contexts
+export const hierarchicalEmbeddings = pgTable('hierarchical_embeddings', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  chunkId: uuid('chunk_id').notNull().references(() => semanticChunks.id, { onDelete: 'cascade' }),
+  embeddingLevel: varchar('embedding_level', { 
+    enum: ['project', 'document', 'section', 'chunk'] 
+  }).notNull(),
+  embedding: text('embedding').notNull(), // JSON string for now
+  contextSummary: text('context_summary'),
+  metadata: json('metadata'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type HierarchicalEmbedding = InferSelectModel<typeof hierarchicalEmbeddings>;
+
+// Document classification and type detection
+export const documentClassifications = pgTable('document_classifications', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  documentId: uuid('document_id').notNull().references(() => projectDocument.id, { onDelete: 'cascade' }),
+  primaryType: varchar('primary_type', { length: 50 }).notNull(),
+  subtype: varchar('subtype', { length: 50 }),
+  sheetNumber: varchar('sheet_number', { length: 20 }),
+  discipline: varchar('discipline', { length: 20 }),
+  confidence: real('confidence').default(0.0),
+  aiAnalysis: json('ai_analysis'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type DocumentClassification = InferSelectModel<typeof documentClassifications>;
+
+// Structured project summaries
+export const projectSummaries = pgTable('project_summaries', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  projectId: uuid('project_id').notNull(), // References chat.id for now
+  summaryType: varchar('summary_type', { 
+    enum: ['overview', 'scope', 'compliance', 'zoning'] 
+  }).notNull(),
+  structuredContent: json('structured_content').notNull(),
+  generatedSummary: text('generated_summary'),
+  sourceDocuments: json('source_documents'), // Array of document IDs as JSON
+  confidence: real('confidence').default(0.0),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export type ProjectSummary = InferSelectModel<typeof projectSummaries>;
+
+// Cross-document relationships and references
+export const documentRelationships = pgTable('document_relationships', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  sourceDocumentId: uuid('source_document_id').notNull().references(() => projectDocument.id, { onDelete: 'cascade' }),
+  targetDocumentId: uuid('target_document_id').notNull().references(() => projectDocument.id, { onDelete: 'cascade' }),
+  relationshipType: varchar('relationship_type', { length: 50 }).notNull(),
+  confidence: real('confidence').default(0.0),
+  metadata: json('metadata'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type DocumentRelationship = InferSelectModel<typeof documentRelationships>;
+
+// Enhanced search and retrieval tracking
+export const queryContext = pgTable('query_context', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  sessionId: varchar('session_id', { length: 100 }),
+  query: text('query').notNull(),
+  queryType: varchar('query_type', { length: 50 }),
+  contextUsed: json('context_used'),
+  resultsReturned: json('results_returned'),
+  userFeedback: json('user_feedback'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type QueryContext = InferSelectModel<typeof queryContext>;

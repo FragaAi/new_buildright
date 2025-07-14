@@ -57,6 +57,13 @@
       "when": 1751393953206,
       "tag": "0007_useful_living_mummy",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1752499491492,
+      "tag": "0008_bent_thor",
+      "breakpoints": true
     }
   ]
 }

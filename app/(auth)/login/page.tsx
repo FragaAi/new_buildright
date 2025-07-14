@@ -125,19 +125,19 @@ export default function Page() {
               </p>
             </div>
             
-            <AuthForm action={handleSubmit} defaultEmail={email}>
-              <SubmitButton isSuccessful={isSuccessful}>Sign in</SubmitButton>
+        <AuthForm action={handleSubmit} defaultEmail={email}>
+          <SubmitButton isSuccessful={isSuccessful}>Sign in</SubmitButton>
               <p className="text-center text-sm text-slate-600 mt-4 dark:text-slate-400">
-                {"Don't have an account? "}
-                <Link
-                  href="/register"
+            {"Don't have an account? "}
+            <Link
+              href="/register"
                   className="font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
-                >
-                  Sign up
-                </Link>
-                {' for free.'}
-              </p>
-            </AuthForm>
+            >
+              Sign up
+            </Link>
+            {' for free.'}
+          </p>
+        </AuthForm>
           </div>
         </div>
       </div>

@@ -11,9 +11,8 @@ const client = postgres(process.env.POSTGRES_URL!)
 const db = drizzle(client)
 
 /**
- * PHASE 1: SEMANTIC SEARCH API WITH VISUAL CONTEXT
- * Enables queries like "find dimensions", "locate kitchen", "structural symbols"
- * Now includes page thumbnails and document information for visual context
+ * NOTEBOOKLM-STYLE SEMANTIC SEARCH API 
+ * Enhanced with similarity thresholds, chat-specific filtering, and contextual responses
  */
 export async function POST(request: NextRequest) {
   try {
@@ -44,15 +43,22 @@ export async function POST(request: NextRequest) {
 
     console.log(`✅ Query embedding generated: ${queryEmbedding.length} dimensions`)
 
-    // 2. Get all stored embeddings with page and document information
+    // 2. Enhanced database query with better filtering
     const whereConditions = []
     
-    // Filter by content type if specified
+    // Always filter by chat if provided - this is critical for security and relevance
+    if (chatId) {
+      whereConditions.push(eq(projectDocument.chatId, chatId))
+      console.log(`🔒 Filtering by chatId: ${chatId}`)
+    }
+    
+    // Filter by content type if specified (but more permissive)
     if (contentType && ['textual', 'visual', 'combined'].includes(contentType)) {
       whereConditions.push(eq(multimodalEmbedding.contentType, contentType))
+      console.log(`📋 Filtering by contentType: ${contentType}`)
     }
 
-    console.log(`📊 Retrieving stored embeddings with page and document info for similarity search...`)
+    console.log(`📊 Retrieving stored embeddings with enhanced filtering for chat ${chatId}...`)
     
     const embeddingsWithContext = await db
       .select({
@@ -85,23 +91,12 @@ export async function POST(request: NextRequest) {
 
     console.log(`📦 Found ${embeddingsWithContext.length} stored embeddings with context to compare`)
 
-    // 3. Calculate cosine similarity for each stored embedding
+    // 3. Calculate cosine similarity with research-based filtering
     const results = []
+    const SIMILARITY_THRESHOLD = 0.3 // Research-based threshold: OpenAI embeddings typically 0.68-1.0, lowering for architectural docs
     
     for (const stored of embeddingsWithContext) {
       try {
-        // Filter by chatId at results level (since metadata is JSON)
-        if (chatId && stored.metadata) {
-          try {
-            const metadata = typeof stored.metadata === 'string' ? JSON.parse(stored.metadata) : stored.metadata
-            if (metadata.chatId !== chatId) {
-              continue // Skip if doesn't match requested chat
-            }
-          } catch {
-            continue // Skip if metadata parsing fails
-          }
-        }
-
         const storedVector = JSON.parse(stored.embedding || '[]')
         if (!Array.isArray(storedVector) || storedVector.length === 0) {
           continue // Skip invalid embeddings
@@ -110,44 +105,52 @@ export async function POST(request: NextRequest) {
         // Calculate cosine similarity
         const similarity = cosineSimilarity(queryEmbedding, storedVector)
         
-        results.push({
-          // Original embedding data
-          id: stored.id,
-          pageId: stored.pageId,
-          contentType: stored.contentType,
-          chunkDescription: stored.chunkDescription,
-          boundingBox: stored.boundingBox,
-          metadata: stored.metadata,
-          similarity,
-          createdAt: stored.createdAt,
-          // Enhanced visual context
-          pageInfo: {
-            pageNumber: stored.pageNumber,
-            pageType: stored.pageType,
-            imageUrl: stored.imageUrl,
-            thumbnailUrl: stored.thumbnailUrl,
-            dimensions: stored.pageDimensions,
-          },
-          documentInfo: {
-            id: stored.documentId,
-            filename: stored.documentFilename,
-            documentType: stored.documentType,
-            status: stored.documentStatus,
-          },
-        })
+        // Debug logging for similarity analysis
+        console.log(`📊 Similarity: ${similarity.toFixed(4)} for "${stored.chunkDescription?.substring(0, 50)}..." from ${stored.documentFilename}`)
+        
+        // Apply research-based relevance threshold
+        if (similarity >= SIMILARITY_THRESHOLD) {
+          results.push({
+            // Original embedding data
+            id: stored.id,
+            pageId: stored.pageId,
+            contentType: stored.contentType,
+            chunkDescription: stored.chunkDescription,
+            boundingBox: stored.boundingBox,
+            metadata: stored.metadata,
+            similarity,
+            createdAt: stored.createdAt,
+            // Enhanced visual context
+            pageInfo: {
+              pageNumber: stored.pageNumber,
+              pageType: stored.pageType,
+              imageUrl: stored.imageUrl,
+              thumbnailUrl: stored.thumbnailUrl,
+              dimensions: stored.pageDimensions,
+            },
+            documentInfo: {
+              id: stored.documentId,
+              filename: stored.documentFilename,
+              documentType: stored.documentType,
+              status: stored.documentStatus,
+            },
+          })
+        }
       } catch (parseError) {
         console.error(`Failed to parse embedding for ${stored.id}:`, parseError)
       }
     }
 
-    // 4. Sort by similarity and return top results
+    // 4. Sort by similarity and return top results (NotebookLM-style ranking)
     const sortedResults = results
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, limit)
 
-    console.log(`🎯 Top ${sortedResults.length} semantic matches found with visual context`)
+    console.log(`🎯 Found ${sortedResults.length} results for query "${query}"`)
     if (sortedResults.length > 0) {
       console.log(`Best match: ${sortedResults[0]?.similarity.toFixed(4)} similarity from ${sortedResults[0]?.documentInfo?.filename} page ${sortedResults[0]?.pageInfo?.pageNumber}`)
+    } else {
+      console.log(`❌ No results found for query "${query}" in chat ${chatId}`)
     }
 
     return NextResponse.json({
@@ -156,6 +159,7 @@ export async function POST(request: NextRequest) {
       totalFound: results.length,
       queryEmbeddingDimensions: queryEmbedding.length,
       searchComplete: true,
+      similarityThreshold: SIMILARITY_THRESHOLD,
     })
 
   } catch (error) {

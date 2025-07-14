@@ -15,9 +15,9 @@ export interface PDFPageResult {
   pageNumber: number;
   imageUrl: string;
   thumbnailUrl: string;
-  textContent: string;
-  dimensions: {
-    width: number;
+        textContent: string; // Enhanced with real PDF text extraction
+      dimensions: {
+        width: number;
     height: number;
     dpi: number;
   };
@@ -28,10 +28,10 @@ export interface PDFPageResult {
 export interface TextElement {
   text: string;
   coordinates: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   };
   fontSize: number;
   fontFamily?: string;
@@ -67,7 +67,7 @@ export interface PDFMetadata {
 export class PDFProcessor {
   private static readonly TARGET_DPI = 300; // High resolution for architectural drawings
   private static readonly THUMBNAIL_SIZE = 200;
-  private static readonly GEMINI_MODEL = 'gemini-2.5-flash';
+  private static readonly GEMINI_MODEL = 'gemini-1.5-flash';
 
   /**
    * Process a PDF file with complete Phase 1 functionality
@@ -91,7 +91,11 @@ export class PDFProcessor {
       // Step 2: Extract metadata
       const metadata = await this.extractMetadata(pdfDoc, fileBuffer, filename);
       
-      // Step 3: Process each page with full Phase 1 pipeline
+      // Step 3: Extract full PDF text once for all pages
+      console.log(`📄 Extracting full text from ${filename}...`);
+      const fullPdfText = await this.extractFullTextFromPDF(fileBuffer);
+      
+      // Step 4: Process each page with full Phase 1 pipeline
       const pages: PDFPageResult[] = [];
       
       for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
@@ -102,7 +106,8 @@ export class PDFProcessor {
           pdfDoc,
           pageIndex,
           filename,
-          chatId
+          chatId,
+          fullPdfText // Pass extracted text to each page
         );
         
         pages.push(pageResult);
@@ -128,7 +133,8 @@ export class PDFProcessor {
     pdfDoc: PDFDocument,
     pageIndex: number,
     filename: string,
-    chatId: string
+    chatId: string,
+    fullPdfText?: string
   ): Promise<PDFPageResult> {
     const pageNumber = pageIndex + 1;
     
@@ -168,17 +174,42 @@ export class PDFProcessor {
       }
     );
     
-    // Step 4: Extract text with coordinates (Phase 1)
-    const textElements = await this.extractTextWithCoordinates(pdfDoc, pageIndex);
+    // Step 4: Extract text with coordinates (Phase 1) - Enhanced with real PDF text
+    const textElements = await this.extractTextWithCoordinates(pdfDoc, pageIndex, fullPdfText);
     
-    // Step 5: Analyze with Gemini Vision API (Phase 1)
-    const visualElements = await this.analyzeWithGeminiVision(imageBuffer, pageNumber);
+    // Step 5: Analyze with Gemini Vision API (Phase 1) - with error handling
+    let visualElements: DetectedElement[] = [];
+    try {
+      visualElements = await this.analyzeWithGeminiVision(imageBuffer, pageNumber);
+    } catch (visionError) {
+      console.warn(`⚠️ Vision analysis failed for page ${pageNumber}, continuing without visual elements:`, visionError);
+      visualElements = []; // Continue processing without visual elements
+    }
     
+    // Extract meaningful text content for this page
+    let pageTextContent = '';
+    if (fullPdfText && fullPdfText.trim().length > 0) {
+      // Extract relevant portion for this page
+      const totalPages = pdfDoc.getPageCount();
+      const textPerPage = Math.ceil(fullPdfText.length / totalPages);
+      const startIndex = pageIndex * textPerPage;
+      const endIndex = Math.min(startIndex + textPerPage, fullPdfText.length);
+      pageTextContent = fullPdfText.substring(startIndex, endIndex).trim();
+      
+      // Apply architectural preprocessing
+      pageTextContent = this.preprocessArchitecturalText(pageTextContent);
+    } else {
+      // Fallback to textElements if no full text available
+      pageTextContent = textElements.map(el => el.text).join(' ').trim();
+    }
+
+    console.log(`📄 Page ${pageNumber} textContent: ${pageTextContent.length} characters`);
+
     return {
       pageNumber,
       imageUrl: imageBlob.url,
       thumbnailUrl: thumbnailBlob.url,
-      textContent: textElements.map(el => el.text).join(' '),
+      textContent: pageTextContent,
       dimensions: {
         width: 2400, // Fixed width for pdftopic output
         height: 3000, // Fixed height for pdftopic output
@@ -206,32 +237,32 @@ export class PDFProcessor {
     console.log(`🔄 Creating placeholder image for page ${pageNumber}...`);
     
     const canvas = createCanvas(2400, 3000);
-    const ctx = canvas.getContext('2d');
-    
+      const ctx = canvas.getContext('2d');
+      
     // White background
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, 2400, 3000);
-    
+      
     // Border
     ctx.strokeStyle = '#E5E7EB';
     ctx.lineWidth = 8;
     ctx.strokeRect(40, 40, 2320, 2920);
-    
+      
     // PDF icon area
     ctx.fillStyle = '#F3F4F6';
     ctx.fillRect(1000, 1200, 400, 300);
-    
+      
     // PDF icon
     ctx.fillStyle = '#6B7280';
     ctx.font = 'bold 120px Arial';
-    ctx.textAlign = 'center';
+      ctx.textAlign = 'center';
     ctx.fillText('PDF', 1200, 1380);
-    
+      
     // Page number
     ctx.fillStyle = '#374151';
     ctx.font = '48px Arial';
     ctx.fillText(`Page ${pageNumber}`, 1200, 1600);
-    
+      
     // Document placeholder text
     ctx.fillStyle = '#9CA3AF';
     ctx.font = '36px Arial';
@@ -290,131 +321,215 @@ export class PDFProcessor {
   }
 
   /**
-   * Extract text with coordinate information using pdf-parse for real text extraction
+   * Extract full text from PDF buffer using pdf-parse-debugging-disabled
+   */
+  private static async extractFullTextFromPDF(fileBuffer: Buffer): Promise<string> {
+    try {
+      // Dynamic import to handle TypeScript issues with any type assertion
+      const pdfParse = (await import('pdf-parse-debugging-disabled' as any)).default;
+      const data: any = await pdfParse(fileBuffer);
+      console.log(`📄 PDF text extraction: ${data.text?.length || 0} characters extracted from ${data.numpages || 0} pages`);
+      return data.text || '';
+    } catch (error) {
+      console.error('❌ PDF text extraction failed:', error);
+      return '';
+    }
+  }
+
+  /**
+   * Extract text with coordinate information using pdf-parse-debugging-disabled for real text extraction
    */
   private static async extractTextWithCoordinates(
     pdfDoc: PDFDocument,
-    pageIndex: number
+    pageIndex: number,
+    fullPdfText?: string
   ): Promise<TextElement[]> {
     try {
       const page = pdfDoc.getPage(pageIndex);
       const { width, height } = page.getSize();
       
-      // Extract real text from the PDF using pdf-parse
+              // Extract real text from the PDF using pdf-parse-debugging-disabled
       const textElements: TextElement[] = [];
       
       try {
-        // Use pdf-lib to extract text from the current page
-        console.log(`📄 Extracting text from PDF using pdf-lib...`);
-        const page = pdfDoc.getPage(pageIndex);
-        
         // Extract text content from the page
-        // Note: pdf-lib doesn't have built-in text extraction, so we'll use fallback approach
+        console.log(`📄 Extracting text from PDF page ${pageIndex + 1}...`);
+        
+        // Use pdf-lib's text extraction capabilities
         let extractedText = '';
         
-        try {
-          // Try to extract text if available (this is a placeholder for future enhancement)
-          // For now, we'll use the fallback architectural text samples
+        // Use the full PDF text extracted via pdf-parse-debugging-disabled
+        if (fullPdfText && fullPdfText.trim().length > 0) {
+          // For this page, extract a portion of the full text
+          // This is a simple approach - in practice, you'd want more sophisticated page-level extraction
+          const totalPages = pdfDoc.getPageCount();
+          const textPerPage = Math.ceil(fullPdfText.length / totalPages);
+          const startIndex = pageIndex * textPerPage;
+          const endIndex = Math.min(startIndex + textPerPage, fullPdfText.length);
+          
+          extractedText = fullPdfText.substring(startIndex, endIndex);
+          console.log(`📄 Page ${pageIndex + 1}: Extracted ${extractedText.length} characters from full PDF text`);
+        } else {
           extractedText = '';
-        } catch (extractError) {
-          console.warn('Text extraction not available, using fallback approach');
-          extractedText = '';
+          console.log(`📄 Page ${pageIndex + 1}: No text available from PDF extraction`);
         }
         
-        if (extractedText && extractedText.trim()) {
-          console.log(`✅ Successfully extracted ${extractedText.length} characters of text from PDF`);
+        // If no text extracted, this might be a scanned document
+        if (!extractedText || extractedText.trim().length < 10) {
+          console.log(`📄 No embedded text found in page ${pageIndex + 1}, likely scanned document`);
           
-          // Split text into lines and create text elements
-          const lines = extractedText.split('\n').filter((line: string) => line.trim().length > 0);
+          // Create placeholder that indicates this needs OCR processing
+          const placeholderText = `[Page ${pageIndex + 1} - Scanned document requiring OCR processing]`;
           
-          // Estimate positioning for each line (since pdf-parse doesn't provide coordinates)
-          const lineHeight = 20; // Estimate line height
-          const startY = height * 0.1; // Start from top
-          
-          lines.forEach((line: string, index: number) => {
-            const trimmedLine = line.trim();
-            if (trimmedLine.length > 0) {
-              // Estimate positioning based on line index and content
-              const estimatedY = startY + (index * lineHeight);
-              const estimatedX = width * 0.05; // Left margin
-              const estimatedWidth = Math.min(trimmedLine.length * 8, width * 0.9); // Character width estimation
-              
-              textElements.push({
-                text: trimmedLine,
-                coordinates: {
-                  x: Math.round(estimatedX),
-                  y: Math.round(estimatedY),
-                  width: Math.round(estimatedWidth),
-                  height: lineHeight,
-                },
-                fontSize: 12, // Default font size
-                fontFamily: 'Arial',
-              });
-            }
+          textElements.push({
+            text: placeholderText,
+            coordinates: {
+              x: Math.round(width * 0.05),
+              y: Math.round(height * 0.5),
+              width: Math.round(width * 0.9),
+              height: 20,
+            },
+            fontSize: 12,
+            fontFamily: 'Arial',
           });
           
-          console.log(`📋 Created ${textElements.length} text elements from extracted PDF text`);
-          
+          console.log(`📋 Created placeholder for scanned page ${pageIndex + 1}`);
         } else {
-          console.warn('⚠️ No text found in PDF, using fallback architectural text samples');
+          console.log(`✅ Successfully extracted ${extractedText.length} characters from page ${pageIndex + 1}`);
           
-          // Fallback to architectural text samples if no text is found
-          const fallbackTexts = [
-            { text: 'ARCHITECTURAL DRAWING', x: width * 0.4, y: height * 0.05, fontSize: 16 },
-            { text: 'FLOOR PLAN', x: width * 0.45, y: height * 0.1, fontSize: 14 },
-          { text: 'SCALE: 1/4" = 1\'-0"', x: width * 0.05, y: height * 0.95, fontSize: 10 },
-          { text: 'LIVING ROOM', x: width * 0.3, y: height * 0.4, fontSize: 12 },
-          { text: 'KITCHEN', x: width * 0.6, y: height * 0.3, fontSize: 12 },
-          { text: 'BEDROOM', x: width * 0.7, y: height * 0.7, fontSize: 12 },
-          { text: '12\'-6"', x: width * 0.2, y: height * 0.5, fontSize: 10 },
-          { text: '8\'-0"', x: width * 0.5, y: height * 0.8, fontSize: 10 },
-        ];
-        
-          fallbackTexts.forEach((textInfo) => {
+          // Process the extracted text
+          const processedText = this.preprocessArchitecturalText(extractedText);
+          
+          // Split text into meaningful chunks
+          const chunks = this.chunkTextSemantically(processedText);
+          
+          // Create text elements for each chunk
+          chunks.forEach((chunk, index) => {
+            const estimatedY = (height * 0.1) + (index * 25);
+            const estimatedX = width * 0.05;
+            
             textElements.push({
-              text: textInfo.text,
+              text: chunk.trim(),
               coordinates: {
-                x: Math.round(textInfo.x),
-                y: Math.round(textInfo.y),
-                width: Math.round(textInfo.text.length * textInfo.fontSize * 0.6),
-                height: Math.round(textInfo.fontSize * 1.2),
+                x: Math.round(estimatedX),
+                y: Math.round(estimatedY),
+                width: Math.round(Math.min(chunk.length * 8, width * 0.9)),
+                height: 20,
               },
-              fontSize: textInfo.fontSize,
+              fontSize: 12,
               fontFamily: 'Arial',
             });
           });
+          
+          console.log(`📋 Created ${textElements.length} text elements from page ${pageIndex + 1}`);
         }
         
       } catch (extractError) {
-        console.warn('⚠️ PDF text extraction failed, using fallback:', extractError);
+        console.error(`❌ Text extraction failed for page ${pageIndex + 1}:`, extractError);
         
-        // Fallback to basic architectural text samples
-        const fallbackTexts = [
-          { text: 'TEXT EXTRACTION FAILED', x: width * 0.4, y: height * 0.05, fontSize: 16 },
-          { text: 'ARCHITECTURAL DOCUMENT', x: width * 0.4, y: height * 0.1, fontSize: 14 },
-          { text: 'SCALE: NOT SPECIFIED', x: width * 0.05, y: height * 0.95, fontSize: 10 },
-        ];
-        
-        fallbackTexts.forEach((textInfo) => {
-          textElements.push({
-            text: textInfo.text,
-            coordinates: {
-              x: Math.round(textInfo.x),
-              y: Math.round(textInfo.y),
-              width: Math.round(textInfo.text.length * textInfo.fontSize * 0.6),
-              height: Math.round(textInfo.fontSize * 1.2),
-            },
-            fontSize: textInfo.fontSize,
-            fontFamily: 'Arial',
-          });
+        // Create error indicator
+        textElements.push({
+          text: `[Page ${pageIndex + 1} - Text extraction failed]`,
+          coordinates: {
+            x: Math.round(width * 0.05),
+            y: Math.round(height * 0.5),
+            width: Math.round(width * 0.9),
+            height: 20,
+          },
+          fontSize: 12,
+          fontFamily: 'Arial',
         });
       }
       
       return textElements;
     } catch (error) {
-      console.error('Error extracting text with coordinates:', error);
+      console.error('Error in extractTextWithCoordinates:', error);
       return [];
     }
+  }
+
+  /**
+   * Preprocess architectural text to standardize terminology and improve quality
+   */
+  private static preprocessArchitecturalText(text: string): string {
+    if (!text || typeof text !== 'string') {
+      return '';
+    }
+
+    let processed = text;
+
+    // Normalize common architectural terms and measurements
+    processed = processed
+      // Standardize dimension formats
+      .replace(/(\d+)\s*['′]\s*(\d+)\s*["″]/g, "$1'-$2\"")
+      .replace(/(\d+)\s*['′]/g, "$1'-0\"")
+      // Standardize room abbreviations
+      .replace(/\bLR\b/gi, 'Living Room')
+      .replace(/\bBR\b/gi, 'Bedroom')
+      .replace(/\bKIT\b/gi, 'Kitchen')
+      .replace(/\bBA\b/gi, 'Bathroom')
+      .replace(/\bCL\b/gi, 'Closet')
+      // Standardize architectural symbols
+      .replace(/\bDR\b/gi, 'Door')
+      .replace(/\bWD\b/gi, 'Window')
+      .replace(/\bWL\b/gi, 'Wall')
+      // Clean up OCR artifacts
+      .replace(/[|]/g, 'I')
+      .replace(/(\d)[oO](\d)/g, '$10$2')
+      // Normalize whitespace
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return processed;
+  }
+
+  /**
+   * Chunk text semantically for better embedding quality
+   */
+  private static chunkTextSemantically(text: string): string[] {
+    if (!text || text.length < 50) {
+      return [text];
+    }
+
+    const chunks: string[] = [];
+    const maxChunkSize = 800; // Tokens roughly
+    const minChunkSize = 100;
+    
+    // Split by common architectural section markers
+    const sections = text.split(/(?=(?:ROOM|FLOOR|PLAN|ELEVATION|SECTION|DETAIL|SCHEDULE|NOTES?|SPEC|CODE|REQUIREMENT))/i);
+    
+    for (const section of sections) {
+      const trimmedSection = section.trim();
+      if (trimmedSection.length < minChunkSize) {
+        // Combine small sections
+        if (chunks.length > 0) {
+          chunks[chunks.length - 1] += ' ' + trimmedSection;
+        } else {
+          chunks.push(trimmedSection);
+        }
+      } else if (trimmedSection.length > maxChunkSize) {
+        // Split large sections by sentences
+        const sentences = trimmedSection.split(/[.!?]+/).filter(s => s.trim().length > 10);
+        let currentChunk = '';
+        
+        for (const sentence of sentences) {
+          if ((currentChunk + sentence).length > maxChunkSize && currentChunk.length > minChunkSize) {
+            chunks.push(currentChunk.trim());
+            currentChunk = sentence.trim();
+          } else {
+            currentChunk += (currentChunk ? '. ' : '') + sentence.trim();
+          }
+        }
+        
+        if (currentChunk.trim()) {
+          chunks.push(currentChunk.trim());
+        }
+      } else {
+        chunks.push(trimmedSection);
+      }
+    }
+
+    return chunks.filter(chunk => chunk.trim().length > 0);
   }
 
   /**

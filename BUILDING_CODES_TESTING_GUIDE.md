@@ -38,7 +38,7 @@ Based on the successful patterns from the OCR Fraga project, the building codes 
 
 2. **Dependencies Installed**:
    ```bash
-   pnpm install  # pdf-parse and @vercel/blob are now properly installed
+   pnpm install  # pdf-parse-debugging-disabled and @vercel/blob are now properly installed
    ```
 
 3. **Vercel Blob Storage**:

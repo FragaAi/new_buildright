@@ -24,10 +24,10 @@ export const semanticSearchTool = ({ chatId, session }: SemanticSearchProps) =>
     description: '🚨 REQUIRED TOOL: Search through uploaded documents using semantic search. You MUST use this tool FIRST for ANY document-related questions. This is MANDATORY when users ask about their documents, files, or content. Use for general questions like "what can you tell me about the documents uploaded?", "what\'s in my documents?", "tell me about uploaded files", "summarize my documents", as well as specific searches like "find dimensions", "locate kitchen", "structural elements", "building specifications". ALWAYS call this tool before responding to document questions.',
     parameters: z.object({
       query: z.string().describe('The search query to find relevant content in uploaded documents'),
-      contentType: z.enum(['textual', 'visual', 'combined']).optional().describe('Type of content to search - textual (text content), visual (architectural elements), or combined'),
+      contentType: z.enum(['textual', 'visual', 'combined']).optional().default('textual').describe('Type of content to search - textual (text content), visual (architectural elements), or combined. Defaults to textual for PDF documents.'),
       limit: z.number().optional().default(10).describe('Maximum number of results to return'),
     }),
-    execute: async ({ query, contentType, limit = 10 }) => {
+    execute: async ({ query, contentType = 'textual', limit = 10 }) => {
       try {
         console.log(`🔍 AI Tool: Semantic search STARTING for "${query}" in chat ${chatId}`);
         console.log(`📋 Parameters:`, { query, contentType, limit, chatId });
@@ -51,13 +51,22 @@ export const semanticSearchTool = ({ chatId, session }: SemanticSearchProps) =>
         const queryEmbedding = queryEmbeddingResult.embedding.values;
         console.log(`✅ Query embedding generated: ${queryEmbedding.length} dimensions`);
 
-        // Build where conditions
+        // Build where conditions for enhanced filtering
         const whereConditions = [];
+        
+        // Always filter by chat if provided - this is critical for security and relevance
+        if (chatId) {
+          whereConditions.push(eq(projectDocument.chatId, chatId));
+          console.log(`🔒 AI Tool: Filtering by chatId: ${chatId}`);
+        }
+        
+        // Filter by content type if specified (but more permissive)
         if (contentType && ['textual', 'visual', 'combined'].includes(contentType)) {
           whereConditions.push(eq(multimodalEmbedding.contentType, contentType));
+          console.log(`📋 AI Tool: Filtering by contentType: ${contentType}`);
         }
 
-        console.log(`📊 Retrieving stored embeddings with page and document info for similarity search...`);
+        console.log(`📊 Retrieving stored embeddings with enhanced filtering for chat ${chatId}...`);
         
         // Get all stored embeddings with page and document information
         const embeddingsWithContext = await db
@@ -91,23 +100,12 @@ export const semanticSearchTool = ({ chatId, session }: SemanticSearchProps) =>
 
         console.log(`📦 Found ${embeddingsWithContext.length} stored embeddings with context to compare`);
 
-        // Calculate cosine similarity for each stored embedding
+        // Calculate cosine similarity with research-based filtering
         const results = [];
+        const SIMILARITY_THRESHOLD = 0.3; // Research-based threshold: OpenAI embeddings typically 0.68-1.0, lowering for architectural docs
         
         for (const stored of embeddingsWithContext) {
           try {
-            // Filter by chatId at results level (since metadata is JSON)
-            if (chatId && stored.metadata) {
-              try {
-                const metadata = typeof stored.metadata === 'string' ? JSON.parse(stored.metadata) : stored.metadata;
-                if (metadata.chatId !== chatId) {
-                  continue; // Skip if doesn't match requested chat
-                }
-              } catch {
-                continue; // Skip if metadata parsing fails
-              }
-            }
-
             const storedVector = JSON.parse(stored.embedding || '[]');
             if (!Array.isArray(storedVector) || storedVector.length === 0) {
               continue; // Skip invalid embeddings
@@ -116,42 +114,53 @@ export const semanticSearchTool = ({ chatId, session }: SemanticSearchProps) =>
             // Calculate cosine similarity
             const similarity = cosineSimilarity(queryEmbedding, storedVector);
             
-            results.push({
-              // Original embedding data
-              id: stored.id,
-              pageId: stored.pageId,
-              contentType: stored.contentType,
-              chunkDescription: stored.chunkDescription,
-              boundingBox: stored.boundingBox,
-              metadata: stored.metadata,
-              similarity,
-              createdAt: stored.createdAt,
-              // Enhanced visual context
-              pageInfo: {
-                pageNumber: stored.pageNumber,
-                pageType: stored.pageType,
-                imageUrl: stored.imageUrl,
-                thumbnailUrl: stored.thumbnailUrl,
-                dimensions: stored.pageDimensions,
-              },
-              documentInfo: {
-                id: stored.documentId,
-                filename: stored.documentFilename,
-                documentType: stored.documentType,
-                status: stored.documentStatus,
-              },
-            });
+            // Debug logging for similarity analysis
+            console.log(`📊 AI Tool Similarity: ${similarity.toFixed(4)} for "${stored.chunkDescription?.substring(0, 50)}..." from ${stored.documentFilename}`);
+            
+            // Apply research-based relevance threshold
+            if (similarity >= SIMILARITY_THRESHOLD) {
+              results.push({
+                // Original embedding data
+                id: stored.id,
+                pageId: stored.pageId,
+                contentType: stored.contentType,
+                chunkDescription: stored.chunkDescription,
+                boundingBox: stored.boundingBox,
+                metadata: stored.metadata,
+                similarity,
+                createdAt: stored.createdAt,
+                // Enhanced visual context
+                pageInfo: {
+                  pageNumber: stored.pageNumber,
+                  pageType: stored.pageType,
+                  imageUrl: stored.imageUrl,
+                  thumbnailUrl: stored.thumbnailUrl,
+                  dimensions: stored.pageDimensions,
+                },
+                documentInfo: {
+                  id: stored.documentId,
+                  filename: stored.documentFilename,
+                  documentType: stored.documentType,
+                  status: stored.documentStatus,
+                },
+              });
+            }
           } catch (parseError) {
             console.error(`Failed to parse embedding for ${stored.id}:`, parseError);
           }
         }
 
-        // Sort by similarity and return top results
+        // Sort by similarity and return top results (NotebookLM-style ranking)
         const sortedResults = results
           .sort((a, b) => b.similarity - a.similarity)
           .slice(0, limit);
 
         console.log(`🎯 Found ${sortedResults.length} results for query "${query}"`);
+        if (sortedResults.length > 0) {
+          console.log(`Best match: ${sortedResults[0]?.similarity.toFixed(4)} similarity from ${sortedResults[0]?.documentInfo?.filename} page ${sortedResults[0]?.pageInfo?.pageNumber}`);
+        } else {
+          console.log(`❌ No results found for query "${query}" in chat ${chatId}`);
+        }
         
         // Close database connection
         await client.end();

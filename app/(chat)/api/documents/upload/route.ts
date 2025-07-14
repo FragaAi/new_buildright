@@ -5,8 +5,10 @@ import { PDFProcessor } from '@/lib/pdf/processor';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
-import { projectDocument, documentPage, visualElement, measurement, multimodalEmbedding } from '@/lib/db/schema';
+import { projectDocument, documentPage, multimodalEmbedding, documentClassifications, documentHierarchy } from '@/lib/db/schema';
 import { generateUUID } from '@/lib/utils';
+import { DocumentClassifier, type PDFPageForClassification } from '@/lib/document/classifier';
+import { HierarchicalParser } from '@/lib/document/hierarchy-parser';
 
 // Database connection
 // biome-ignore lint: Forbidden non-null assertion.
@@ -46,77 +48,52 @@ export async function POST(request: NextRequest) {
           results.push({
             filename: file.name,
             status: 'error',
-            error: 'Only PDF files are allowed',
+            error: 'Only PDF files are supported',
           });
           continue;
         }
 
-        // Convert file to buffer
+        // Convert to buffer
         const fileBuffer = Buffer.from(await file.arrayBuffer());
 
-        // Validate PDF format
-        if (!PDFProcessor.validatePDF(fileBuffer)) {
-          results.push({
-            filename: file.name,
-            status: 'error',
-            error: 'Invalid PDF file format',
-          });
-          continue;
-        }
-
-        // Check file size (limit to 100MB)
-        const maxSize = 100 * 1024 * 1024; // 100MB
-        if (fileBuffer.length > maxSize) {
-          results.push({
-            filename: file.name,
-            status: 'error',
-            error: 'File size exceeds 100MB limit',
-          });
-          continue;
-        }
-
-        // Generate unique filename
+        // Upload to Vercel Blob
         const timestamp = Date.now();
-        const cleanFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-        const uniqueFilename = `${timestamp}_${cleanFilename}`;
+        const filename = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const blobPath = `documents/${chatId}/${timestamp}_${filename}`;
 
-        // Upload original PDF to Vercel Blob
-        const pdfBlob = await put(
-          `documents/${chatId}/originals/${uniqueFilename}`,
-          fileBuffer,
-          {
-            access: 'public',
-            contentType: 'application/pdf',
-          }
-        );
+        const { url } = await put(blobPath, fileBuffer, {
+          access: 'public',
+          contentType: file.type,
+        });
 
-        // Create database record with 'uploading' status
-        const [documentRecord] = await db
-          .insert(projectDocument)
-          .values({
-            id: generateUUID(),
-            chatId,
-            filename: uniqueFilename,
-            originalFilename: file.name,
-            fileUrl: pdfBlob.url,
-            fileSize: fileBuffer.length.toString(),
-            mimeType: file.type,
-            documentType: 'other', // Will be determined during processing
-            uploadStatus: 'uploading',
-          })
-          .returning();
+        // Create document record
+        const documentId = generateUUID();
+        await db.insert(projectDocument).values({
+          id: documentId,
+          chatId,
+          filename: filename,
+          originalFilename: file.name,
+          fileUrl: url,
+          fileSize: fileBuffer.length.toString(),
+          mimeType: file.type,
+          uploadStatus: 'uploading',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
 
-        // Start processing in the background
-        processDocumentInBackground(documentRecord.id, fileBuffer, uniqueFilename, chatId);
+        console.log(`✅ Document uploaded: ${file.name} -> ${documentId}`);
+
+        // Start background processing for NotebookLM-style document understanding
+        processDocumentInBackground(documentId, fileBuffer, file.name, chatId);
 
         results.push({
           filename: file.name,
-          documentId: documentRecord.id,
-          status: 'processing',
-          message: 'File uploaded successfully, processing started',
+          status: 'uploaded',
+          documentId,
+          url,
         });
       } catch (error) {
-        console.error(`Error processing file ${file.name}:`, error);
+        console.error(`Error uploading ${file.name}:`, error);
         results.push({
           filename: file.name,
           status: 'error',
@@ -125,21 +102,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({
-      message: 'Upload completed',
-      results,
-    });
+    return NextResponse.json({ results });
   } catch (error) {
     console.error('Upload error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Failed to upload files' },
       { status: 500 }
     );
   }
 }
 
 /**
- * Process document in the background (non-blocking)
+ * NOTEBOOKLM-STYLE DOCUMENT PROCESSING
+ * Focuses on content understanding, classification, and embedding generation
+ * No visual element extraction to avoid database conflicts
  */
 async function processDocumentInBackground(
   documentId: string,
@@ -148,137 +124,58 @@ async function processDocumentInBackground(
   chatId: string
 ) {
   try {
-            // Update status to 'processing'
-        await db
-          .update(projectDocument)
-          .set({ 
-            uploadStatus: 'processing',
-            updatedAt: new Date(),
-          })
-          .where(eq(projectDocument.id, documentId));
+    console.log(`🚀 Starting NotebookLM-style processing for document ${documentId} (${filename})`);
+    
+    // Update status to 'processing'
+    await db
+      .update(projectDocument)
+      .set({ 
+        uploadStatus: 'processing',
+        updatedAt: new Date(),
+      })
+      .where(eq(projectDocument.id, documentId));
 
-    console.log(`Starting PDF processing for document ${documentId}`);
+    console.log(`📊 Updated document ${documentId} status to 'processing'`);
 
-    // Process the PDF
+    // Process the PDF for text and basic info only
     const processingResult = await PDFProcessor.processPDF(
       fileBuffer,
       filename,
       chatId
     );
 
-    console.log(`PDF processing completed for document ${documentId}. Pages: ${processingResult.pages.length}`);
+    console.log(`📄 PDF processing completed for document ${documentId}. Pages: ${processingResult.pages.length}`);
 
-    // Save processed pages to database
+    // Save processed pages to database (simplified - no visual elements)
     const pageInserts = processingResult.pages.map((page) => ({
       id: generateUUID(),
       documentId,
       pageNumber: page.pageNumber.toString(),
-      pageType: 'other' as const, // Will be determined by AI later
+      pageType: 'other' as const, // Will be determined by classification
       imageUrl: page.imageUrl,
       thumbnailUrl: page.thumbnailUrl,
       dimensions: page.dimensions,
-      scaleInfo: null, // Will be determined by AI later
+      scaleInfo: null,
     }));
 
     const insertedPages = await db.insert(documentPage).values(pageInserts).returning();
+    console.log(`💾 Saved ${insertedPages.length} pages for document ${documentId}`);
 
-    // Save all extracted data from Phase 1 processing
+    // NOTEBOOKLM WORKFLOW: Classification and Embedding Generation
+    // Generate embeddings for semantic search (core NotebookLM functionality)
     for (let i = 0; i < processingResult.pages.length; i++) {
       const page = processingResult.pages[i];
       const dbPage = insertedPages[i];
 
-      // Save visual elements (detected by Gemini Vision)
-      if (page.visualElements && page.visualElements.length > 0) {
-        const visualElementInserts = page.visualElements.map((element) => {
-          // Map element types to database schema
-          const dbElementType = element.type === 'structural_element' ? 'other' : 
-                               element.type === 'room_label' ? 'room' : 
-                               element.type;
-          
-          return {
-            id: generateUUID(),
-            pageId: dbPage.id,
-            elementType: dbElementType as 'dimension' | 'wall' | 'door' | 'window' | 'room' | 'symbol' | 'text_annotation' | 'callout' | 'grid_line' | 'other',
-            boundingBox: element.coordinates,
-            confidence: element.confidence?.toString() || '0.5',
-            properties: element.properties || {},
-            textContent: element.textContent || null,
-          };
-        });
-        
-        await db.insert(visualElement).values(visualElementInserts);
-        console.log(`📐 Saved ${visualElementInserts.length} visual elements for page ${page.pageNumber}`);
-      }
-
-      // Save text elements with coordinates
-      if (page.textElements && page.textElements.length > 0) {
-        // For now, store text elements as visual elements with type 'text_annotation'
-        const textElementInserts = page.textElements.map((textEl) => ({
-          id: generateUUID(),
-          pageId: dbPage.id,
-          elementType: 'text_annotation' as const,
-          boundingBox: {
-            x: textEl.coordinates.x,
-            y: textEl.coordinates.y,
-            width: textEl.coordinates.width,
-            height: textEl.coordinates.height,
-          },
-          confidence: '0.95', // High confidence for extracted text
-          properties: {
-            fontSize: textEl.fontSize,
-            fontFamily: textEl.fontFamily,
-            source: 'text_extraction',
-          },
-          textContent: textEl.text,
-        }));
-        
-        await db.insert(visualElement).values(textElementInserts);
-        console.log(`📝 Saved ${textElementInserts.length} text elements for page ${page.pageNumber}`);
-      }
-
-      // Extract and save measurements from visual elements
-      if (page.visualElements) {
-        const measurementInserts = [];
-        
-        for (const element of page.visualElements) {
-          if (element.type === 'dimension' && element.textContent) {
-            // Parse dimension text like "12'-6"" or "8'-0""
-            const dimensionMatch = element.textContent.match(/(\d+)'?-?(\d+)"?/);
-            if (dimensionMatch) {
-              const feet = parseInt(dimensionMatch[1]);
-              const inches = dimensionMatch[2] ? parseInt(dimensionMatch[2]) : 0;
-              const totalInches = feet * 12 + inches;
-              
-              measurementInserts.push({
-                id: generateUUID(),
-                pageId: dbPage.id,
-                elementId: null, // Will link to visual element after insertion
-                measurementType: 'length' as const,
-                value: (totalInches / 12).toString(), // Convert to feet
-                unit: 'ft' as const,
-                fromCoordinates: { x: element.coordinates.x, y: element.coordinates.y },
-                toCoordinates: { 
-                  x: element.coordinates.x + element.coordinates.width, 
-                  y: element.coordinates.y 
-                },
-                annotationText: element.textContent,
-                confidence: element.confidence?.toString() || '0.5',
-              });
-            }
-          }
-        }
-        
-        if (measurementInserts.length > 0) {
-          await db.insert(measurement).values(measurementInserts);
-          console.log(`📏 Saved ${measurementInserts.length} measurements for page ${page.pageNumber}`);
-        }
-      }
-
-      // Generate embeddings for RAG and chat functionality
+      console.log(`🧠 Processing page ${page.pageNumber} for embeddings...`);
       await generateEmbeddingsForPage(dbPage.id, page, chatId);
     }
 
-    // Update document status to 'ready'
+    // Classify the document using AI (NotebookLM-style intelligence)
+    console.log(`🤖 Starting document classification for ${documentId}...`);
+    await classifyDocument(documentId, processingResult.pages, insertedPages);
+
+    // Update status to 'ready'
     await db
       .update(projectDocument)
       .set({ 
@@ -287,23 +184,31 @@ async function processDocumentInBackground(
       })
       .where(eq(projectDocument.id, documentId));
 
-    console.log(`Document ${documentId} processing completed successfully`);
+    console.log(`✅ NotebookLM processing completed for document ${documentId} (${filename}) - Status: READY`);
+
   } catch (error) {
-    console.error(`Error processing document ${documentId}:`, error);
+    console.error(`❌ Error processing document ${documentId} (${filename}):`, error);
+    console.error(`❌ Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
     
     // Update status to 'failed'
-    await db
-      .update(projectDocument)
-      .set({ 
-        uploadStatus: 'failed',
-        updatedAt: new Date(),
-      })
-      .where(eq(projectDocument.id, documentId));
+    try {
+      await db
+        .update(projectDocument)
+        .set({ 
+          uploadStatus: 'failed',
+          updatedAt: new Date(),
+        })
+        .where(eq(projectDocument.id, documentId));
+      console.log(`📊 Updated document ${documentId} status to 'failed'`);
+    } catch (updateError) {
+      console.error(`❌ Failed to update document status to 'failed' for ${documentId}:`, updateError);
+    }
   }
 }
 
 /**
- * Generate REAL embeddings for RAG and chat functionality using Google's Text Embedding API
+ * Generate embeddings for semantic search (NotebookLM core feature)
+ * Enhanced with AI-powered content analysis and meaningful descriptions
  */
 async function generateEmbeddingsForPage(
   pageId: string,
@@ -311,151 +216,202 @@ async function generateEmbeddingsForPage(
   chatId: string
 ) {
   try {
-    console.log(`🧠 Generating REAL embeddings for page ${page.pageNumber}`);
-    
+    if (!page.textContent || page.textContent.trim().length === 0) {
+      console.log(`⚠️ No text content for page ${page.pageNumber}, skipping embedding generation`);
+      return;
+    }
+
     // Import Google's official Generative AI SDK
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     
-    // Initialize with your API key
+    // Initialize with API key
     const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!);
-    
-    // Get the embedding model
     const embeddingModel = genAI.getGenerativeModel({ model: 'text-embedding-004' });
-    
-    const embeddingInserts = [];
+    const analysisModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-    // 1. Generate TEXT EMBEDDINGS for extracted text content
-    if (page.textElements && page.textElements.length > 0) {
-      const pageTextContent = page.textElements.map((el: any) => el.text).join(' ');
-      
-      if (pageTextContent.trim()) {
-        console.log(`📝 Generating text embedding for: "${pageTextContent.substring(0, 100)}..."`);
-        
-        try {
-          const textEmbeddingResult = await embeddingModel.embedContent(pageTextContent);
-          const textEmbedding = textEmbeddingResult.embedding.values;
-          
-          embeddingInserts.push({
-            id: generateUUID(),
-            pageId,
-            contentType: 'textual' as const,
-            chunkDescription: `Text content from page ${page.pageNumber}: ${pageTextContent.substring(0, 100)}...`,
-            embedding: JSON.stringify(textEmbedding), // Store actual vector
-            boundingBox: null,
-            metadata: {
-              pageNumber: page.pageNumber,
-              elementCount: page.textElements.length,
-              source: 'text_extraction',
-              chatId,
-              fullText: pageTextContent,
-              embeddingDimensions: textEmbedding.length,
-            },
-          });
-          
-          console.log(`✅ Text embedding generated: ${textEmbedding.length} dimensions`);
-        } catch (textEmbedError) {
-          console.error('Failed to generate text embedding:', textEmbedError);
-        }
-      }
-    }
+    console.log(`🧠 Processing page ${page.pageNumber} for NotebookLM-style embeddings...`);
 
-    // 2. Generate VISUAL EMBEDDINGS for detected architectural elements
-    if (page.visualElements && page.visualElements.length > 0) {
-      for (const element of page.visualElements) {
-        if (element.textContent || element.type) {
-          const elementDescription = element.textContent 
-            ? `Architectural ${element.type}: ${element.textContent} at coordinates ${element.coordinates.x},${element.coordinates.y}`
-            : `Architectural ${element.type} element detected at coordinates ${element.coordinates.x},${element.coordinates.y}`;
+    // Step 1: Analyze content and generate meaningful description
+    const contentAnalysisPrompt = `Analyze this architectural document text and provide a concise, descriptive summary of its content in 2-3 sentences. Focus on what information this text contains that would be useful for construction and design queries.
 
-          console.log(`🏗️ Generating visual embedding for: "${elementDescription}"`);
-          
-          try {
-            const visualEmbeddingResult = await embeddingModel.embedContent(elementDescription);
-            const visualEmbedding = visualEmbeddingResult.embedding.values;
-            
-                          embeddingInserts.push({
-                id: generateUUID(),
-                pageId,
-                contentType: 'visual' as const,
-                chunkDescription: elementDescription,
-                embedding: JSON.stringify(visualEmbedding), // Store actual vector
-                boundingBox: element.coordinates,
-                metadata: {
-                  pageNumber: page.pageNumber,
-                  elementType: element.type,
-                  confidence: element.confidence,
-                  properties: element.properties,
-                  source: 'gemini_vision',
-                  chatId,
-                  searchableText: elementDescription,
-                  embeddingDimensions: visualEmbedding.length,
-                },
-              });
-            
-            console.log(`✅ Visual embedding generated for ${element.type}: ${visualEmbedding.length} dimensions`);
-          } catch (visualEmbedError) {
-            console.error(`Failed to generate visual embedding for ${element.type}:`, visualEmbedError);
-          }
-        }
-      }
-    }
+Text content:
+${page.textContent.substring(0, 1500)}...
 
-    // 3. Generate COMBINED MULTIMODAL EMBEDDING for the entire page
-    const visualElementsText = page.visualElements?.map((el: any) => 
-      `${el.type}${el.textContent ? ': ' + el.textContent : ''}`
-    ).join(', ') || 'None';
-    
-    const pageDescription = `
-      Architectural drawing page ${page.pageNumber} contains:
-      Text annotations: ${page.textElements?.map((el: any) => el.text).join(', ') || 'None'}
-      Detected elements: ${visualElementsText}
-      Document dimensions: ${page.dimensions.width}x${page.dimensions.height} pixels at ${page.dimensions.dpi} DPI
-      This page contains architectural/engineering information suitable for building code compliance analysis.
-    `.trim();
+Provide only the summary, no additional formatting:`;
 
-    console.log(`🔄 Generating combined page embedding`);
-    
+    let chunkDescription = `Page ${page.pageNumber} content`;
     try {
-      const combinedEmbeddingResult = await embeddingModel.embedContent(pageDescription);
-      const combinedEmbedding = combinedEmbeddingResult.embedding.values;
+      const analysisResult = await analysisModel.generateContent(contentAnalysisPrompt);
+      const analysisText = analysisResult.response.text();
       
-      embeddingInserts.push({
-        id: generateUUID(),
-        pageId,
-        contentType: 'combined' as const,
-        chunkDescription: `Complete architectural analysis of page ${page.pageNumber}`,
-        embedding: JSON.stringify(combinedEmbedding), // Store actual vector
-        boundingBox: null,
-        metadata: {
-          pageNumber: page.pageNumber,
-          totalTextElements: page.textElements?.length || 0,
-          totalVisualElements: page.visualElements?.length || 0,
-          source: 'multimodal_analysis',
-          chatId,
-          fullDescription: pageDescription,
-          embeddingDimensions: combinedEmbedding.length,
-        },
-      });
-      
-      console.log(`✅ Combined page embedding generated: ${combinedEmbedding.length} dimensions`);
-    } catch (combinedEmbedError) {
-      console.error('Failed to generate combined page embedding:', combinedEmbedError);
+      if (analysisText && analysisText.trim().length > 10) {
+        chunkDescription = analysisText.trim();
+        console.log(`📋 Generated AI description for page ${page.pageNumber}: "${chunkDescription.substring(0, 100)}..."`);
+      }
+    } catch (analysisError) {
+      console.warn(`⚠️ Content analysis failed for page ${page.pageNumber}, using fallback description`);
     }
 
-    // Store all REAL embeddings in database
-    if (embeddingInserts.length > 0) {
-      await db.insert(multimodalEmbedding).values(embeddingInserts);
-      console.log(`🧠 Stored ${embeddingInserts.length} REAL vector embeddings for page ${page.pageNumber}`);
-      console.log(`🔍 RAG search now enabled for: "find dimensions", "locate kitchen", "structural symbols", etc.`);
+    // Step 2: Semantic chunking for better embedding quality
+    const chunks = semanticChunkText(page.textContent);
+    console.log(`📄 Created ${chunks.length} semantic chunks for page ${page.pageNumber}`);
+
+    // Step 3: Generate embeddings for each chunk
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+      const chunk = chunks[chunkIndex];
+      
+      if (chunk.trim().length < 50) {
+        console.log(`⚠️ Skipping short chunk ${chunkIndex + 1} for page ${page.pageNumber}`);
+        continue;
+      }
+
+      try {
+        // Generate embedding for chunk
+        const embeddingResult = await embeddingModel.embedContent(chunk);
+        const embedding = embeddingResult.embedding.values;
+
+        // Create chunk-specific description
+        const finalDescription = chunks.length > 1 
+          ? `${chunkDescription} (Part ${chunkIndex + 1} of ${chunks.length})`
+          : chunkDescription;
+
+        // Save to database
+        await db.insert(multimodalEmbedding).values({
+          id: generateUUID(),
+          pageId: pageId,
+          contentType: 'textual',
+          chunkDescription: finalDescription,
+          embedding: JSON.stringify(embedding),
+          metadata: {
+            pageNumber: page.pageNumber,
+            source: 'semantic_chunking',
+            embeddingDimensions: embedding.length,
+            chatId: chatId,
+            chunkIndex: chunkIndex,
+            totalChunks: chunks.length,
+            chunkLength: chunk.length,
+          },
+        });
+
+        console.log(`💾 Saved embedding for page ${page.pageNumber}, chunk ${chunkIndex + 1}/${chunks.length}`);
+
+      } catch (embeddingError) {
+        console.error(`❌ Failed to generate embedding for page ${page.pageNumber}, chunk ${chunkIndex + 1}:`, embeddingError);
+      }
     }
+
+    console.log(`✅ Completed embedding generation for page ${page.pageNumber} with ${chunks.length} chunks`);
 
   } catch (error) {
-    console.error(`Error generating embeddings for page ${page.pageNumber}:`, error);
-    // Don't fail the entire process if embeddings fail
+    console.error(`Failed to generate embeddings for page ${page.pageNumber}:`, error);
   }
 }
 
-// GET endpoint to check processing status and return document details with thumbnails
+/**
+ * Semantic chunking for architectural documents
+ */
+function semanticChunkText(text: string): string[] {
+  if (!text || text.length < 100) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  const maxChunkSize = 800; // Optimal size for embeddings
+  const minChunkSize = 100;
+  const overlapSize = 100; // Overlap to maintain context
+  
+  // Split by architectural markers first
+  const sections = text.split(/(?=(?:ROOM|FLOOR|PLAN|ELEVATION|SECTION|DETAIL|SCHEDULE|NOTES?|DRAWING|SCALE|DIMENSION))/i);
+  
+  for (const section of sections) {
+    const trimmedSection = section.trim();
+    
+    if (trimmedSection.length <= maxChunkSize) {
+      // Section fits in one chunk
+      if (trimmedSection.length >= minChunkSize) {
+        chunks.push(trimmedSection);
+      } else if (chunks.length > 0) {
+        // Merge small sections with previous chunk
+        chunks[chunks.length - 1] += '\n\n' + trimmedSection;
+      } else {
+        chunks.push(trimmedSection);
+      }
+    } else {
+      // Split large sections with overlap
+      let start = 0;
+      while (start < trimmedSection.length) {
+        let end = Math.min(start + maxChunkSize, trimmedSection.length);
+        
+        // Try to break at sentence boundaries
+        if (end < trimmedSection.length) {
+          const lastSentence = trimmedSection.lastIndexOf('.', end);
+          const lastNewline = trimmedSection.lastIndexOf('\n', end);
+          const breakPoint = Math.max(lastSentence, lastNewline);
+          
+          if (breakPoint > start + minChunkSize) {
+            end = breakPoint + 1;
+          }
+        }
+        
+        const chunk = trimmedSection.substring(start, end).trim();
+        if (chunk.length >= minChunkSize) {
+          chunks.push(chunk);
+        }
+        
+        // Move start position with overlap
+        start = Math.max(end - overlapSize, start + minChunkSize);
+        if (start >= trimmedSection.length) break;
+      }
+    }
+  }
+
+  return chunks.filter(chunk => chunk.trim().length > 0);
+}
+
+/**
+ * Classify document using AI (NotebookLM-style document understanding)
+ */
+async function classifyDocument(
+  documentId: string, 
+  processingPages: any[], 
+  dbPages: any[]
+): Promise<void> {
+  try {
+    console.log(`🤖 Starting AI classification for document ${documentId}`);
+
+    // Prepare pages for classification
+    const classificationPages: PDFPageForClassification[] = processingPages.map((page, index) => ({
+      pageNumber: page.pageNumber,
+      imageUrl: page.imageUrl,
+      textContent: page.textContent || '',
+      pageId: dbPages[index].id,
+    }));
+
+    // Classify the document
+    const classifier = new DocumentClassifier();
+    const classification = await classifier.classifyDocument(classificationPages);
+    
+    console.log(`📊 Document classified as: ${classification.primaryType}/${classification.subtype}`);
+
+    // Save classification to database
+    await db.insert(documentClassifications).values({
+      id: generateUUID(),
+      documentId: documentId,
+      primaryType: classification.primaryType,
+      subtype: classification.subtype,
+      sheetNumber: classification.sheetNumber,
+      discipline: classification.discipline,
+      confidence: classification.confidence,
+      aiAnalysis: classification.aiAnalysis,
+    });
+
+    console.log(`💾 Saved document classification for ${documentId}`);
+
+  } catch (error) {
+    console.error(`Failed to classify document ${documentId}:`, error);
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = await auth();
@@ -472,102 +428,75 @@ export async function GET(request: NextRequest) {
 
     console.log(`📋 PDF Sidebar - Fetching documents for chat: ${chatId}`);
 
-    // Get all documents for this chat with their processing status and page thumbnails
+    // Get all documents for this chat with page information
     const documentsWithPages = await db
       .select({
         id: projectDocument.id,
-        chatId: projectDocument.chatId,
-        filename: projectDocument.filename,
         originalFilename: projectDocument.originalFilename,
-        fileUrl: projectDocument.fileUrl,
-        fileSize: projectDocument.fileSize,
-        mimeType: projectDocument.mimeType,
-        documentType: projectDocument.documentType,
         uploadStatus: projectDocument.uploadStatus,
         createdAt: projectDocument.createdAt,
-        updatedAt: projectDocument.updatedAt,
-        // Page information
-        pageId: documentPage.id,
-        pageNumber: documentPage.pageNumber,
-        pageType: documentPage.pageType,
-        imageUrl: documentPage.imageUrl,
-        thumbnailUrl: documentPage.thumbnailUrl,
-        dimensions: documentPage.dimensions,
+        fileUrl: projectDocument.fileUrl,
       })
       .from(projectDocument)
-      .leftJoin(documentPage, eq(projectDocument.id, documentPage.documentId))
       .where(eq(projectDocument.chatId, chatId))
-      .orderBy(projectDocument.createdAt, documentPage.pageNumber);
+      .orderBy(projectDocument.createdAt);
 
     console.log(`📊 PDF Sidebar - Raw query returned ${documentsWithPages.length} rows`);
 
-    // Group the results by document
-    const documentsMap = new Map();
-    
-    for (const row of documentsWithPages) {
-      const docId = row.id;
-      
-      if (!documentsMap.has(docId)) {
-        documentsMap.set(docId, {
-          id: row.id,
-          chatId: row.chatId,
-          filename: row.filename,
-          originalFilename: row.originalFilename,
-          fileUrl: row.fileUrl,
-          fileSize: row.fileSize,
-          mimeType: row.mimeType,
-          documentType: row.documentType,
-          uploadStatus: row.uploadStatus,
-          createdAt: row.createdAt,
-          updatedAt: row.updatedAt,
-          pages: [],
-          pageCount: 0,
-          firstPageThumbnail: null,
-        });
-      }
-      
-      const doc = documentsMap.get(docId);
-      
-      // Add page information if it exists
-      if (row.pageId) {
-        const pageNumber = parseInt(row.pageNumber || '0');
-        doc.pages.push({
-          id: row.pageId,
-          pageNumber: pageNumber,
-          pageType: row.pageType,
-          imageUrl: row.imageUrl,
-          thumbnailUrl: row.thumbnailUrl,
-          dimensions: row.dimensions,
-        });
-        
-        // Set first page thumbnail (page 1) as document thumbnail
-        if (pageNumber === 1 && row.thumbnailUrl) {
-          doc.firstPageThumbnail = row.thumbnailUrl;
-          console.log(`🖼️ PDF Sidebar - Set thumbnail for ${doc.originalFilename}: ${row.thumbnailUrl}`);
-        }
-      }
-    }
-    
-    // Convert map to array and calculate page counts
-    const documents = Array.from(documentsMap.values()).map(doc => ({
-      ...doc,
-      pageCount: doc.pages.length,
-      // Sort pages by page number
-      pages: doc.pages.sort((a: any, b: any) => a.pageNumber - b.pageNumber),
-    }));
+         // Get page information for each document
+     const documentsWithPageInfo = await Promise.all(
+       documentsWithPages.map(async (doc) => {
+         try {
+           // Get pages for this document
+           const pages = await db
+             .select()
+             .from(documentPage)
+             .where(eq(documentPage.documentId, doc.id));
 
-    console.log(`📋 PDF Sidebar - Received documents: ${documents.length}`);
-    documents.forEach(doc => {
-      console.log(`📄 ${doc.originalFilename} - Status: ${doc.uploadStatus}, Pages: ${doc.pageCount}, Thumbnail: ${doc.firstPageThumbnail ? 'YES' : 'NO'}`);
+           // Set thumbnail from first page if available
+           let thumbnailUrl = '';
+           if (pages.length > 0 && pages[0].thumbnailUrl) {
+             thumbnailUrl = pages[0].thumbnailUrl;
+             console.log(`🖼️ PDF Sidebar - Set thumbnail for ${doc.originalFilename}: ${thumbnailUrl}`);
+           }
+
+           return {
+             id: doc.id,
+             originalFilename: doc.originalFilename,
+             uploadStatus: doc.uploadStatus,
+             createdAt: doc.createdAt,
+             fileUrl: doc.fileUrl,
+             pageCount: pages.length,
+             thumbnailUrl,
+           };
+         } catch (error) {
+           console.error(`Error fetching pages for document ${doc.id}:`, error);
+           return {
+             id: doc.id,
+             originalFilename: doc.originalFilename,
+             uploadStatus: doc.uploadStatus,
+             createdAt: doc.createdAt,
+             fileUrl: doc.fileUrl,
+             pageCount: 0,
+             thumbnailUrl: '',
+           };
+         }
+       })
+     );
+
+    console.log(`📋 PDF Sidebar - Received documents: ${documentsWithPageInfo.length}`);
+    
+    // Log document status for debugging
+    documentsWithPageInfo.forEach(doc => {
+      const hasThumb = doc.thumbnailUrl ? 'YES' : 'NO';
+      console.log(`📄 ${doc.originalFilename} - Status: ${doc.uploadStatus}, Pages: ${doc.pageCount}, Thumbnail: ${hasThumb}`);
     });
 
-    return NextResponse.json({
-      documents,
-    });
+    return NextResponse.json({ documents: documentsWithPageInfo });
   } catch (error) {
-    console.error('Status check error:', error);
+    console.error('Error fetching documents:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Failed to fetch documents' },
       { status: 500 }
     );
   }

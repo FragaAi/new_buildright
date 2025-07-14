@@ -100,19 +100,24 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
       doc.uploadStatus === 'uploading' || doc.uploadStatus === 'processing'
     );
 
+    // Only start polling if we have processing documents and we're not already polling
     if (hasProcessingDocuments && open && chatId && !isPolling) {
       console.log('📄 PDF Sidebar - Starting polling for processing documents');
       startPolling();
-    } else if (!hasProcessingDocuments && isPolling) {
+    }
+    // Stop polling if no processing documents and we are currently polling
+    else if (!hasProcessingDocuments && isPolling) {
       console.log('📄 PDF Sidebar - All documents processed, stopping polling');
       stopPolling();
     }
+  }, [documents, open, chatId]); // Removed isPolling to avoid circular dependency
 
-    // Cleanup on unmount
+  // Cleanup polling on unmount
+  React.useEffect(() => {
     return () => {
       stopPolling();
     };
-  }, [documents, open, chatId, isPolling]);
+  }, []);
 
   const startPolling = () => {
     if (pollingIntervalRef.current) return; // Already polling
@@ -141,7 +146,7 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
       }
       
       const response = await fetch(`/api/documents/upload?chatId=${chatId}`);
-      const data = await response.json();
+        const data = await response.json();
       
       console.log('📋 Frontend - API Response:', data);
       console.log('📋 Frontend - Documents received:', data.documents?.length || 0);
@@ -160,25 +165,28 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
         
         setDocuments(data.documents);
         
-        // Check if we need to start polling
-        const processingDocs = data.documents.filter((doc: DocumentStatus) => 
-          doc.uploadStatus === 'uploading' || doc.uploadStatus === 'processing'
-        );
-        
-        if (processingDocs.length > 0) {
-          console.log(`🔄 Frontend - Starting polling for ${processingDocs.length} processing documents`);
-          startPolling();
-        } else {
-          console.log('✅ Frontend - All documents ready, stopping polling');
-          stopPolling();
+        // Only manage polling if this is not a silent fetch (i.e., not called from polling)
+        if (!silentFetch) {
+          // Check if we need to start polling
+          const processingDocs = data.documents.filter((doc: DocumentStatus) => 
+            doc.uploadStatus === 'uploading' || doc.uploadStatus === 'processing'
+          );
+          
+          if (processingDocs.length > 0) {
+            console.log(`🔄 Frontend - Starting polling for ${processingDocs.length} processing documents`);
+            startPolling();
+      } else {
+            console.log('✅ Frontend - All documents ready, stopping polling');
+            stopPolling();
+          }
         }
       }
     } catch (error) {
       console.error('Error fetching documents:', error);
     } finally {
       if (!silentFetch) {
-        setLoading(false);
-      }
+      setLoading(false);
+    }
     }
   };
 
@@ -387,14 +395,14 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
           >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              multiple
-              onChange={handleFileUpload}
-              className="hidden"
-            />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf"
+          multiple
+          onChange={handleFileUpload}
+          className="hidden"
+        />
             
             {/* Drop Zone Visual */}
             <div className={cn(
@@ -415,24 +423,24 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <Button
-                    onClick={() => fileInputRef.current?.click()}
+        <Button
+          onClick={() => fileInputRef.current?.click()}
                     disabled={uploading}
-                    className="w-full"
-                    variant="outline"
-                  >
-                    {uploading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Uploading...
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="mr-2 h-4 w-4" />
-                        Upload PDFs
-                      </>
-                    )}
-                  </Button>
+          className="w-full"
+          variant="outline"
+        >
+          {uploading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Uploading...
+            </>
+          ) : (
+            <>
+              <Upload className="mr-2 h-4 w-4" />
+              Upload PDFs
+            </>
+          )}
+        </Button>
                   <p className="text-xs text-muted-foreground">
                     {!chatId 
                       ? "💬 Send a message first, then upload your documents"
@@ -448,17 +456,17 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
                 </div>
               )}
             </div>
-          </div>
+      </div>
         )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
           {activeTab === 'documents' ? (
-            <div className="p-4">
-              {loading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                </div>
+        <div className="p-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
               ) : !chatId ? (
                 <div className="space-y-4">
                   <div className="rounded-lg border-2 border-dashed border-muted-foreground/25 p-8 text-center">
@@ -469,31 +477,31 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
                     </p>
                   </div>
                 </div>
-              ) : documents.length === 0 ? (
-                <div className="space-y-4">
-                  <div className="rounded-lg border-2 border-dashed border-muted-foreground/25 p-8 text-center">
-                    <FileText className="mx-auto h-12 w-12 text-muted-foreground/50" />
-                    <h3 className="mt-4 text-lg font-medium">No documents uploaded</h3>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      Upload PDF documents to analyze architectural drawings and check building code compliance
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <h4 className="text-sm font-medium text-muted-foreground">
-                    Uploaded Documents ({documents.length})
+          ) : documents.length === 0 ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border-2 border-dashed border-muted-foreground/25 p-8 text-center">
+                <FileText className="mx-auto h-12 w-12 text-muted-foreground/50" />
+                <h3 className="mt-4 text-lg font-medium">No documents uploaded</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Upload PDF documents to analyze architectural drawings and check building code compliance
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-muted-foreground">
+                Uploaded Documents ({documents.length})
                     {isPolling && (
                       <span className="ml-2 text-xs text-blue-500">
                         • Processing...
                       </span>
                     )}
-                  </h4>
-                  {documents.map((doc) => (
-                    <div
-                      key={doc.id}
+              </h4>
+              {documents.map((doc) => (
+                <div
+                  key={doc.id}
                       className="rounded-lg border p-3 hover:bg-muted/50 transition-colors"
-                    >
+                >
                       <div className="flex items-start gap-3">
                         {/* Thumbnail */}
                         <div className="flex-shrink-0">
@@ -517,29 +525,29 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
                               <FileText className="w-8 h-8 text-gray-400" />
                             </div>
                           )}
-                        </div>
+                  </div>
 
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
                                 {doc.originalFilename}
-                              </p>
+                    </p>
                               <div className="flex items-center gap-2 mt-1">
                                 {getStatusIcon(doc.uploadStatus)}
                                 <span className="text-xs text-muted-foreground">
-                                  {getStatusText(doc.uploadStatus)}
+                      {getStatusText(doc.uploadStatus)}
                                 </span>
                               </div>
                               {doc.uploadStatus === 'ready' && (
                                 <p className="text-xs text-muted-foreground mt-1">
                                   {doc.pageCount} page{doc.pageCount !== 1 ? 's' : ''}
-                                </p>
+                    </p>
                               )}
-                              <p className="text-xs text-muted-foreground">
-                                {new Date(doc.createdAt).toLocaleDateString()}
-                              </p>
-                            </div>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(doc.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
                             
                             {/* View Button */}
                             {doc.uploadStatus === 'ready' && doc.pageCount > 0 && (
@@ -622,26 +630,26 @@ function DocumentViewer({ document, isOpen, onClose }: DocumentViewerProps) {
         {/* Content */}
         <div className="p-4 overflow-y-auto max-h-[calc(90vh-100px)]">
           {document.pages && document.pages.length > 0 ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {document.pages.map((page) => (
-                <div key={page.id} className="space-y-2">
-                  <div className="relative">
-                    <img
-                      src={page.imageUrl}
-                      alt={`Page ${page.pageNumber}`}
-                      className="w-full h-auto border rounded bg-white"
-                      loading="lazy"
-                    />
-                    <div className="absolute top-2 left-2 bg-black/75 text-white text-xs px-2 py-1 rounded">
-                      Page {page.pageNumber}
-                    </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {document.pages.map((page) => (
+              <div key={page.id} className="space-y-2">
+                <div className="relative">
+                  <img
+                    src={page.imageUrl}
+                    alt={`Page ${page.pageNumber}`}
+                    className="w-full h-auto border rounded bg-white"
+                    loading="lazy"
+                  />
+                  <div className="absolute top-2 left-2 bg-black/75 text-white text-xs px-2 py-1 rounded">
+                    Page {page.pageNumber}
                   </div>
-                  <p className="text-xs text-muted-foreground text-center">
-                    {page.dimensions.width} × {page.dimensions.height}
-                  </p>
                 </div>
-              ))}
-            </div>
+                <p className="text-xs text-muted-foreground text-center">
+                  {page.dimensions.width} × {page.dimensions.height}
+                </p>
+              </div>
+            ))}
+          </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
