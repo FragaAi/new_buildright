@@ -183,6 +183,9 @@ const PurePreviewMessage = ({
                           args={args}
                           isReadonly={isReadonly}
                         />
+                      ) : toolName === 'semanticSearch' ? (
+                        // Hide semantic search call - it's used internally by the AI
+                        null
                       ) : null}
                     </div>
                   );
@@ -212,6 +215,9 @@ const PurePreviewMessage = ({
                           result={result}
                           isReadonly={isReadonly}
                         />
+                      ) : toolName === 'semanticSearch' ? (
+                        // Hide semantic search results - they're used internally by the AI
+                        null
                       ) : (
                         <pre>{JSON.stringify(result, null, 2)}</pre>
                       )}
