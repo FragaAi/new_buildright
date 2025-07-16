@@ -16,7 +16,7 @@ import {
 import { toast } from 'sonner';
 import { useLocalStorage, useWindowSize } from 'usehooks-ts';
 
-import { ArrowUpIcon, PaperclipIcon, StopIcon, FloridaBuildingCodeIcon, MiamiDadeZoningIcon } from './icons';
+import { ArrowUpIcon, PaperclipIcon, StopIcon, FloridaBuildingCodeIcon, MiamiDadeZoningIcon, CheckedSquare } from './icons';
 import { PreviewAttachment } from './preview-attachment';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -295,6 +295,7 @@ function PureMultimodalInput({
         <AttachmentsButton fileInputRef={fileInputRef} status={status} />
         <ComplianceButton type="fbc" status={status} append={append} />
         <ComplianceButton type="miami-dade" status={status} append={append} />
+        <ComplianceButton type="standards" status={status} append={append} />
       </div>
 
       <div className="absolute bottom-0 right-0 p-2 w-fit flex flex-row justify-end">
@@ -355,23 +356,36 @@ function PureComplianceButton({
   status,
   append,
 }: {
-  type: 'fbc' | 'miami-dade';
+  type: 'fbc' | 'miami-dade' | 'standards';
   status: UseChatHelpers['status'];
   append: UseChatHelpers['append'];
 }) {
   const handleComplianceCheck = () => {
     if (status !== 'ready') return;
-    
-    const complianceType = type === 'fbc' ? 'Florida Building Code' : 'Miami Dade County Zoning';
+    let complianceType, content, icon, title;
+    if (type === 'fbc') {
+      complianceType = 'Florida Building Code';
+      content = `Please run a Florida Building Code compliance check on all uploaded documents and plans. Analyze for potential violations, provide specific code citations, and give recommendations for any issues found.`;
+      icon = <FloridaBuildingCodeIcon size={14} />;
+      title = 'Florida Building Code Compliance';
+    } else if (type === 'miami-dade') {
+      complianceType = 'Miami Dade County Zoning';
+      content = `Please run a Miami Dade County Zoning compliance check on all uploaded documents and plans. Analyze for potential violations, provide specific code citations, and give recommendations for any issues found.`;
+      icon = <MiamiDadeZoningIcon size={14} />;
+      title = 'Miami Dade Zoning Compliance';
+    } else {
+      complianceType = 'Standards Checklist';
+      content = `Please run a standards checklist compliance check on all uploaded documents and plans. Analyze for presence of required checklist items (A-100, A-101, etc.) and return a structured checklist with status for each item.`;
+      icon = <CheckedSquare size={14} />;
+      title = 'Standards Checklist Compliance';
+    }
     append({
       role: 'user',
-      content: `Please run a ${complianceType} compliance check on all uploaded documents and plans. Analyze for potential violations, provide specific code citations, and give recommendations for any issues found.`,
+      content,
     });
   };
-
-  const icon = type === 'fbc' ? <FloridaBuildingCodeIcon size={14} /> : <MiamiDadeZoningIcon size={14} />;
-  const title = type === 'fbc' ? 'Florida Building Code Compliance' : 'Miami Dade Zoning Compliance';
-
+  const icon = type === 'fbc' ? <FloridaBuildingCodeIcon size={14} /> : type === 'miami-dade' ? <MiamiDadeZoningIcon size={14} /> : <CheckedSquare size={14} />;
+  const title = type === 'fbc' ? 'Florida Building Code Compliance' : type === 'miami-dade' ? 'Miami Dade Zoning Compliance' : 'Standards Checklist Compliance';
   return (
     <Button
       data-testid={`${type}-compliance-button`}
