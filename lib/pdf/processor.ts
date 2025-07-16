@@ -551,15 +551,18 @@ export class PDFProcessor {
 3. **Text annotations** - Labels, room names, notes, specifications
 4. **Structural elements** - Beams, columns, foundation elements
 5. **Grid lines and reference systems** - Coordinate grids, reference bubbles
+6. **Zoning legends and zoning tables** - Look for tables or legends that describe zoning categories, allowed/existing/proposed zoning data, lot/ground coverage, and open space requirements. Extract the table or legend content as structured data if possible.
+7. **Zoning diagrams** - Identify diagrams or visual elements that illustrate zoning boundaries, overlays, or compliance areas. Extract their captions or annotations.
+8. **Open space/green area annotations** - Look for any notes, tables, or diagrams that indicate open space, green area, or landscape requirements/calculations. Extract their content and location.
 
 For each element found, provide:
-- Type (dimension, wall, door, window, room, symbol, text_annotation, callout, grid_line, other)
+- Type (dimension, wall, door, window, room, symbol, text_annotation, callout, grid_line, zoning_legend, zoning_table, zoning_diagram, open_space_annotation, other)
 - Bounding box coordinates (x, y, width, height)
 - Confidence score (0.0 to 1.0)
 - Any text content if applicable
-- Relevant properties (e.g., dimensions, material, etc.)
+- Relevant properties (e.g., dimensions, material, zoning category, allowed/existing/proposed values, open space area, etc.)
 
-Focus on elements that would be important for building code compliance and construction analysis.`;
+Focus on elements that would be important for building code, zoning, and site plan compliance analysis.`;
 
       // Real Gemini Vision API call for Phase 1
       try {
