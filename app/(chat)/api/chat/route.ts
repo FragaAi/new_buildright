@@ -26,6 +26,7 @@ import { getWeather } from '@/lib/ai/tools/get-weather';
 import { semanticSearchTool } from '@/lib/ai/tools/semantic-search';
 import { floridaBuildingCodeComplianceTool } from '@/lib/ai/tools/florida-building-code-compliance';
 import { miamiDadeZoningComplianceTool } from '@/lib/ai/tools/miami-dade-zoning-compliance';
+import { standardsChecklistComplianceTool } from '@/lib/ai/tools/standards-checklist-compliance';
 import { isProductionEnvironment } from '@/lib/constants';
 import { myProvider } from '@/lib/ai/providers';
 import { entitlementsByUserType } from '@/lib/ai/entitlements';
@@ -182,6 +183,7 @@ export async function POST(request: Request) {
                   'semanticSearch',
                   'floridaBuildingCodeCompliance',
                   'miamiDadeZoningCompliance',
+                  'standardsChecklistCompliance',
                 ],
           experimental_transform: smoothStream({ chunking: 'word' }),
           experimental_generateMessageId: generateUUID,
@@ -196,6 +198,7 @@ export async function POST(request: Request) {
             semanticSearch: semanticSearchTool({ chatId: id, session }),
             floridaBuildingCodeCompliance: floridaBuildingCodeComplianceTool({ chatId: id, session }),
             miamiDadeZoningCompliance: miamiDadeZoningComplianceTool({ chatId: id, session }),
+            standardsChecklistCompliance: standardsChecklistComplianceTool({ chatId: id, session }),
           },
           onFinish: async ({ response }) => {
             console.log('✅ Stream finished successfully');
