@@ -227,7 +227,7 @@ async function generateEmbeddingsForPage(
     // Initialize with API key
     const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!);
     const embeddingModel = genAI.getGenerativeModel({ model: 'text-embedding-004' });
-    const analysisModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const analysisModel = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
 
     console.log(`🧠 Processing page ${page.pageNumber} for NotebookLM-style detailed content extraction...`);
 

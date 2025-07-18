@@ -67,7 +67,7 @@ export interface PDFMetadata {
 export class PDFProcessor {
   private static readonly TARGET_DPI = 300; // High resolution for architectural drawings
   private static readonly THUMBNAIL_SIZE = 200;
-  private static readonly GEMINI_MODEL = 'gemini-1.5-flash';
+  private static readonly GEMINI_MODEL = 'gemini-2.5-pro';
 
   /**
    * Process a PDF file with complete Phase 1 functionality

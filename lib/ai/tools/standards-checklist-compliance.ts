@@ -481,7 +481,7 @@ export const standardsChecklistComplianceTool = ({ chatId, session }: StandardsC
 
             const complianceResult = await client`
               INSERT INTO compliance_checks (id, chat_id, document_id, check_type, status, code_sections_referenced, findings, created_at, updated_at) 
-              VALUES (${generateUUID()}, ${chatId}, ${documentId}, ${'ai_assisted'}, ${overallScore >= 80 ? 'compliant' : overallScore >= 50 ? 'requires_review' : 'non_compliant'}, ${JSON.stringify(['A-100', 'A-101'])}, ${JSON.stringify({
+              VALUES (${generateUUID()}, ${chatId}, ${documentId}, ${'ai_assisted'}, ${overallScore >= 80 ? 'compliant' : overallScore >= 50 ? 'requires_review' : 'non_compliant'}, ${'{"A-100","A-101"}'}, ${JSON.stringify({
                 overallScore: overallScore,
                 totalItems: totalItems,
                 foundItems: foundItems,
