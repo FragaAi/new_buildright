@@ -5,6 +5,7 @@
  */
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import pRetry from 'p-retry';
 
 export interface DocumentClassificationResult {
   primaryType: 'architectural' | 'structural' | 'electrical' | 'plumbing' | 'mechanical' | 'civil' | 'specifications' | 'other';
@@ -78,7 +79,10 @@ export class DocumentClassifier {
 
       console.log('📝 Sending classification request to Gemini Vision API...');
 
-      // Analyze with Gemini Vision
+      // Analyze with Gemini Vision with retry logic
+      const analysisText = await pRetry(
+        async () => {
+          console.log('🔄 Attempting document classification...');
       const result = await this.model.generateContent([
         {
           text: prompt
@@ -92,12 +96,68 @@ export class DocumentClassifier {
       ]);
 
       const response = await result.response;
-      const analysisText = response.text();
+          return response.text();
+        },
+        {
+          retries: 2,
+          minTimeout: 1000,
+          maxTimeout: 4000,
+          factor: 2,
+          onFailedAttempt: (error) => {
+            console.warn(`⚠️ Classification attempt ${error.attemptNumber} failed: ${error.message}`);
+          },
+        }
+      );
 
       console.log('🤖 Gemini Vision Analysis:', analysisText);
 
       // Parse the AI response
-      const classification = this.parseClassificationResponse(analysisText);
+      let classification = this.parseClassificationResponse(analysisText);
+      
+      // If confidence is low, try re-classification with enhanced prompt
+      if (classification.confidence < 0.7) {
+        console.log(`⚠️ Low confidence (${classification.confidence}), attempting re-classification with enhanced prompt...`);
+        
+        try {
+          const enhancedPrompt = this.createEnhancedClassificationPrompt(pagesToAnalyze, classification);
+          
+          const enhancedAnalysisText = await pRetry(
+            async () => {
+              const result = await this.model.generateContent([
+                {
+                  text: enhancedPrompt
+                },
+                {
+                  inlineData: {
+                    mimeType: 'image/png',
+                    data: imageBase64
+                  }
+                }
+              ]);
+
+              const response = await result.response;
+              return response.text();
+            },
+            {
+              retries: 1,
+              minTimeout: 1500,
+              onFailedAttempt: (error) => {
+                console.warn(`⚠️ Enhanced classification attempt failed: ${error.message}`);
+              },
+            }
+          );
+          
+          const enhancedClassification = this.parseClassificationResponse(enhancedAnalysisText);
+          
+          // Use enhanced result if confidence improved
+          if (enhancedClassification.confidence > classification.confidence) {
+            console.log(`✅ Enhanced classification improved confidence from ${classification.confidence} to ${enhancedClassification.confidence}`);
+            classification = enhancedClassification;
+          }
+        } catch (enhancedError) {
+          console.warn('Enhanced classification failed, using original result:', enhancedError);
+        }
+      }
       
       console.log('✅ Document classification completed:', classification);
       
@@ -195,6 +255,80 @@ RESPONSE FORMAT (JSON):
 }
 
 Focus on accuracy - if uncertain, choose the most likely option and indicate lower confidence.
+`;
+  }
+
+  /**
+   * Create an enhanced prompt for re-classification when confidence is low
+   */
+  private createEnhancedClassificationPrompt(pages: PDFPageForClassification[], previousClassification: DocumentClassificationResult): string {
+    const textContent = pages
+      .map(page => page.textElements?.map(el => el.text).join(' ') || '')
+      .join(' ');
+
+    return `
+You are an expert architectural document classifier performing a detailed re-analysis. The initial classification had low confidence (${previousClassification.confidence}), so please provide a more detailed analysis.
+
+CONTEXT:
+- This is page ${pages[0].pageNumber} of a construction document set
+- Previous classification: ${previousClassification.primaryType}/${previousClassification.subtype}
+- Previous reasoning: ${previousClassification.aiAnalysis.reasoning}
+- Text content: "${textContent.substring(0, 800)}..."
+
+ENHANCED ANALYSIS REQUIRED:
+
+1. **Visual Content Analysis**: Look carefully at:
+   - Title blocks and headers
+   - Drawing content and symbols
+   - Text annotations and labels
+   - Scale indicators and north arrows
+   - Dimension lines and measurements
+   - Room layouts and spaces
+   - Technical symbols (electrical, plumbing, structural)
+
+2. **Document Type Indicators**: Focus on these specific clues:
+   - ARCHITECTURAL: Floor plans, room layouts, door/window schedules, elevations
+     - Look for: room names, furniture layouts, door swings, window symbols
+   - STRUCTURAL: Beam layouts, column grids, foundation plans, framing
+     - Look for: beam callouts, column symbols, structural grid lines
+   - ELECTRICAL: Panel schedules, lighting layouts, power plans
+     - Look for: outlet symbols, light fixtures, electrical panels
+   - PLUMBING: Fixture layouts, piping diagrams, water/waste lines
+     - Look for: toilet/sink symbols, pipe runs, plumbing fixtures
+   - MECHANICAL: HVAC layouts, equipment schedules, ductwork
+     - Look for: air handlers, ductwork, HVAC equipment
+
+3. **Sheet Number Analysis**: Look for standard format:
+   - A-### (Architectural), S-### (Structural), E-### (Electrical)
+   - P-### (Plumbing), M-### (Mechanical), C-### (Civil)
+
+4. **Drawing Type Classification**:
+   - PLAN: Top-down view showing layouts
+   - ELEVATION: Side view showing building facades
+   - SECTION: Cut-through view showing interior details
+   - DETAIL: Enlarged view of specific construction elements
+   - SCHEDULE: Tables listing doors, windows, or equipment
+
+RESPONSE FORMAT (JSON):
+{
+  "primaryType": "architectural|structural|electrical|plumbing|mechanical|civil|specifications|other",
+  "subtype": "plan|elevation|section|detail|schedule|cover|index|notes|other",
+  "sheetNumber": "extracted sheet number or null",
+  "discipline": "A|S|E|P|M|C|G or extracted discipline code",
+  "confidence": 0.0-1.0,
+  "titleBlockInfo": {
+    "projectName": "extracted project name or null",
+    "sheetTitle": "extracted sheet title or null", 
+    "drawingNumber": "extracted drawing number or null",
+    "revisionInfo": "extracted revision info or null"
+  },
+  "detectedElements": ["specific visual elements you can clearly identify"],
+  "drawingType": "specific description like 'First Floor Plan' or 'Electrical Panel Schedule'",
+  "scaleFactor": "extracted scale info or null",
+  "reasoning": "detailed explanation of why you chose this classification based on visual evidence"
+}
+
+Provide higher confidence (0.8+) only if you can clearly identify multiple supporting visual elements.
 `;
   }
 
