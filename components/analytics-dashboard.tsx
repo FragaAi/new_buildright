@@ -28,8 +28,16 @@ interface AnalyticsData {
     totalVisualElements: number;
     totalMeasurements: number;
     totalEmbeddings: number;
+    // Adobe-specific metrics
+    totalAdobeElements: number;
+    totalAdobeTables: number;
+    totalAdobeFigures: number;
+    totalAdobeTextElements: number;
+    totalExtractedMeasurements: number;
     processingComplete: boolean;
-    extractionQuality: 'Good' | 'Partial' | 'None';
+    extractionQuality: 'Excellent' | 'Good' | 'Partial' | 'Basic' | 'None';
+    processingMethod: 'Adobe Enhanced' | 'Standard';
+    dataRichness: 'High' | 'Standard';
   };
   documents: Array<{
     id: string;
@@ -46,6 +54,28 @@ interface AnalyticsData {
     measurementType: string;
     unit: string;
     count: number;
+  }>;
+  // Adobe analytics data
+  adobeTableStats: {
+    count: number;
+    withCsvData: number;
+  };
+  adobeFigureStats: Array<{
+    byType: string;
+    typeCount: number;
+  }>;
+  adobeTextStats: {
+    count: number;
+    withCoordinates: number;
+  };
+  adobeEmbeddingStats: {
+    tableEmbeddings: number;
+    figureEmbeddings: number;
+  };
+  extractedMeasurements: Array<{
+    measurement: string;
+    context: string;
+    path: string;
   }>;
   embeddingStats: Array<{
     contentType: string;
@@ -113,8 +143,10 @@ export function AnalyticsDashboard({ chatId, selectedDocumentId }: AnalyticsDash
 
   const getQualityBadgeColor = (quality: string) => {
     switch (quality) {
+      case 'Excellent': return 'bg-green-100 text-green-800 border-green-300';
       case 'Good': return 'bg-green-100 text-green-800 border-green-300';
       case 'Partial': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+      case 'Basic': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
       case 'None': return 'bg-red-100 text-red-800 border-red-300';
       default: return 'bg-gray-100 text-gray-800 border-gray-300';
     }
@@ -236,7 +268,7 @@ export function AnalyticsDashboard({ chatId, selectedDocumentId }: AnalyticsDash
                   <div className="text-xs text-gray-600">Pages</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-xl font-bold text-purple-600">{summary.totalVisualElements}</div>
+                  <div className="text-xl font-bold text-purple-600">{summary.totalAdobeElements || summary.totalVisualElements}</div>
                   <div className="text-xs text-gray-600">Elements</div>
                 </div>
                 <div className="text-center">
@@ -258,9 +290,16 @@ export function AnalyticsDashboard({ chatId, selectedDocumentId }: AnalyticsDash
                     {summary.processingComplete ? 'Complete' : 'Processing'}
                   </span>
                 </div>
-                <Badge className={getQualityBadgeColor(summary.extractionQuality)}>
-                  {summary.extractionQuality} Quality
-                </Badge>
+                <div className="flex gap-2">
+                  <Badge className={getQualityBadgeColor(summary.extractionQuality)}>
+                    {summary.extractionQuality} Quality
+                  </Badge>
+                  {summary.processingMethod && (
+                    <Badge variant={summary.processingMethod === 'Adobe Enhanced' ? 'default' : 'secondary'}>
+                      {summary.processingMethod}
+                    </Badge>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -297,58 +336,156 @@ export function AnalyticsDashboard({ chatId, selectedDocumentId }: AnalyticsDash
       {/* Elements Tab */}
       {activeTab === 'elements' && (
         <div className="space-y-4">
-          {/* Visual Elements Stats */}
+          {/* Adobe Extraction Summary */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Visual Elements Detected</CardTitle>
+              <CardTitle className="text-sm font-medium">Adobe Extraction Summary</CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
-              <div className="space-y-2">
-                {visualElementStats.map((stat) => (
-                  <div key={stat.elementType} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{getElementTypeIcon(stat.elementType)}</span>
-                      <span className="text-sm font-medium capitalize">
-                        {stat.elementType.replace('_', ' ')}
-                      </span>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="text-center p-3 bg-blue-50 rounded-lg">
+                  <div className="text-lg font-bold text-blue-600">{analyticsData.adobeTableStats?.count || 0}</div>
+                  <div className="text-xs text-blue-700">Tables</div>
+                  {analyticsData.adobeTableStats?.withCsvData > 0 && (
+                    <div className="text-xs text-blue-600 mt-1">
+                      {analyticsData.adobeTableStats.withCsvData} with CSV data
                     </div>
-                    <Badge variant="outline">{stat.count}</Badge>
-                  </div>
-                ))}
-              </div>
-              {visualElementStats.length === 0 && (
-                <div className="text-center py-4 text-gray-500 text-sm">
-                  No visual elements detected yet
+                  )}
                 </div>
-              )}
+                <div className="text-center p-3 bg-green-50 rounded-lg">
+                  <div className="text-lg font-bold text-green-600">{summary.totalAdobeFigures || 0}</div>
+                  <div className="text-xs text-green-700">Figures</div>
+                  {analyticsData.adobeEmbeddingStats?.figureEmbeddings > 0 && (
+                    <div className="text-xs text-green-600 mt-1">
+                      {analyticsData.adobeEmbeddingStats.figureEmbeddings} embedded
+                    </div>
+                  )}
+                </div>
+                <div className="text-center p-3 bg-purple-50 rounded-lg">
+                  <div className="text-lg font-bold text-purple-600">{analyticsData.adobeTextStats?.count || 0}</div>
+                  <div className="text-xs text-purple-700">Text Elements</div>
+                  {analyticsData.adobeTextStats?.withCoordinates > 0 && (
+                    <div className="text-xs text-purple-600 mt-1">
+                      {analyticsData.adobeTextStats.withCoordinates} with coordinates
+                    </div>
+                  )}
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          {/* Detailed Elements Preview */}
-          {detailedVisualElements.length > 0 && (
+          {/* Figure Types Breakdown */}
+          {analyticsData.adobeFigureStats && analyticsData.adobeFigureStats.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">Recent Detections</CardTitle>
+                <CardTitle className="text-sm font-medium">Figure Types Detected</CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {detailedVisualElements.slice(0, 10).map((element) => (
-                    <div key={element.id} className="flex items-center gap-2 p-2 bg-gray-50 rounded text-xs">
-                      <span>{getElementTypeIcon(element.elementType)}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium">
-                          {element.elementType.replace('_', ' ')}
-                        </div>
-                        <div className="text-gray-600 truncate">
-                          Page {element.pageNumber} • {element.documentFilename}
-                        </div>
+                <div className="space-y-2">
+                  {analyticsData.adobeFigureStats.map((stat) => (
+                    <div key={stat.byType} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🖼️</span>
+                        <span className="text-sm font-medium capitalize">
+                          {stat.byType || 'Unknown'}
+                        </span>
                       </div>
-                      <Badge variant="outline" className="text-xs">
-                        {Math.round(parseFloat(element.confidence || '0') * 100)}%
-                      </Badge>
+                      <Badge variant="outline">{stat.typeCount}</Badge>
                     </div>
                   ))}
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Extracted Measurements Preview */}
+          {analyticsData.extractedMeasurements && analyticsData.extractedMeasurements.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">Sample Extracted Measurements</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {analyticsData.extractedMeasurements.slice(0, 10).map((measurement, index) => (
+                    <div key={index} className="flex items-start gap-2 p-2 bg-gray-50 rounded text-xs">
+                      <span className="text-orange-600 font-mono font-bold">📏</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-orange-700">
+                          {measurement.measurement}
+                        </div>
+                        <div className="text-gray-600 truncate">
+                          {measurement.context}
+                        </div>
+                        {measurement.path && (
+                          <div className="text-xs text-blue-600 font-mono mt-1">
+                            {measurement.path}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 text-xs text-center text-gray-500">
+                  Showing {Math.min(10, analyticsData.extractedMeasurements.length)} of {analyticsData.extractedMeasurements.length} measurements
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Processing Quality Indicator */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium">Extraction Quality</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Processing Method</span>
+                  <Badge variant={summary.processingMethod === 'Adobe Enhanced' ? 'default' : 'secondary'}>
+                    {summary.processingMethod || 'Standard'}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Data Richness</span>
+                  <Badge variant={summary.dataRichness === 'High' ? 'default' : 'secondary'}>
+                    {summary.dataRichness || 'Standard'}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Extraction Quality</span>
+                  <Badge className={getQualityBadgeColor(summary.extractionQuality)}>
+                    {summary.extractionQuality}
+                  </Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Fallback to Standard Elements if no Adobe data */}
+          {(!analyticsData.adobeTableStats?.count && !summary.totalAdobeFigures && !analyticsData.adobeTextStats?.count) && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">Standard Visual Elements</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="space-y-2">
+                  {visualElementStats.map((stat) => (
+                    <div key={stat.elementType} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">{getElementTypeIcon(stat.elementType)}</span>
+                        <span className="text-sm font-medium capitalize">
+                          {stat.elementType.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <Badge variant="outline">{stat.count}</Badge>
+                    </div>
+                  ))}
+                </div>
+                {visualElementStats.length === 0 && (
+                  <div className="text-center py-4 text-gray-500 text-sm">
+                    No elements detected yet
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}

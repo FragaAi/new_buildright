@@ -10,6 +10,7 @@ import {
   foreignKey,
   boolean,
   real,
+  integer,
 } from 'drizzle-orm/pg-core';
 
 export const user = pgTable('User', {
@@ -402,6 +403,91 @@ export const hierarchicalEmbeddings = pgTable('hierarchical_embeddings', {
 });
 
 export type HierarchicalEmbedding = InferSelectModel<typeof hierarchicalEmbeddings>;
+
+// Adobe PDF Extract API tables
+export const adobeExtractedTables = pgTable('adobe_extracted_tables', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  pageId: uuid('page_id').notNull().references(() => documentPage.id, { onDelete: 'cascade' }),
+  tableIndex: integer('table_index').notNull(),
+  bounds: json('bounds').notNull(),
+  csvData: text('csv_data'),
+  xlsxUrl: text('xlsx_url'),
+  pngUrl: text('png_url'),
+  metadata: json('metadata'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type AdobeExtractedTable = InferSelectModel<typeof adobeExtractedTables>;
+
+export const extractedFigures = pgTable('extracted_figures', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  pageId: uuid('page_id').notNull().references(() => documentPage.id, { onDelete: 'cascade' }),
+  figureType: varchar('figure_type', { length: 50 }),
+  imageUrl: text('image_url'),
+  thumbnailUrl: text('thumbnail_url'),
+  bounds: json('bounds'),
+  caption: text('caption'),
+  confidence: real('confidence'),
+  adobeMetadata: json('adobe_metadata'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type ExtractedFigure = InferSelectModel<typeof extractedFigures>;
+
+export const adobeTextElements = pgTable('adobe_text_elements', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  pageId: uuid('page_id').notNull().references(() => documentPage.id, { onDelete: 'cascade' }),
+  textContent: text('text_content').notNull(),
+  coordinates: json('coordinates').notNull(),
+  fontInfo: json('font_info'),
+  stylingInfo: json('styling_info'),
+  pathInfo: text('path_info'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type AdobeTextElement = InferSelectModel<typeof adobeTextElements>;
+
+export const adobeDocumentStructure = pgTable('adobe_document_structure', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  documentId: uuid('document_id').notNull().references(() => projectDocument.id, { onDelete: 'cascade' }),
+  elementType: varchar('element_type', { length: 50 }),
+  path: text('path'),
+  bounds: json('bounds'),
+  pageNumber: integer('page_number'),
+  hierarchyLevel: integer('hierarchy_level'),
+  parentId: uuid('parent_id'), // Self-reference handled separately
+  textContent: text('text_content'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type AdobeDocumentStructure = InferSelectModel<typeof adobeDocumentStructure>;
+
+// Specialized table for Adobe extracted table embeddings
+export const tableEmbeddings = pgTable('table_embeddings', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  adobeTableId: uuid('adobe_table_id').notNull().references(() => adobeExtractedTables.id, { onDelete: 'cascade' }),
+  rowIndex: integer('row_index'),
+  columnName: text('column_name'),
+  cellValue: text('cell_value'),
+  rowDescription: text('row_description'), // Natural language description of the row
+  embedding: text('embedding'), // Vector embedding for this table row/cell
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type TableEmbedding = InferSelectModel<typeof tableEmbeddings>;
+
+// Specialized table for Adobe extracted figure embeddings  
+export const figureEmbeddings = pgTable('figure_embeddings', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  adobeFigureId: uuid('adobe_figure_id').notNull().references(() => extractedFigures.id, { onDelete: 'cascade' }),
+  caption: text('caption'),
+  description: text('description'), // Enhanced AI-generated description
+  spatialElements: json('spatial_elements'), // Detected elements with coordinates
+  embedding: text('embedding'), // Vector embedding for this figure
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type FigureEmbedding = InferSelectModel<typeof figureEmbeddings>;
 
 // Document classification and type detection
 export const documentClassifications = pgTable('document_classifications', {

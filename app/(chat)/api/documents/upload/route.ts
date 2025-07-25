@@ -5,10 +5,12 @@ import { PDFProcessor } from '@/lib/pdf/processor';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
-import { projectDocument, documentPage, multimodalEmbedding, documentClassifications, documentHierarchy } from '@/lib/db/schema';
+import { projectDocument, documentPage, multimodalEmbedding, documentClassifications, documentHierarchy, semanticChunks, tableEmbeddings, figureEmbeddings, hierarchicalEmbeddings, adobeExtractedTables, adobeTextElements, adobeDocumentStructure, extractedFigures } from '@/lib/db/schema';
 import { generateUUID } from '@/lib/utils';
 import { DocumentClassifier, type PDFPageForClassification } from '@/lib/document/classifier';
 import { HierarchicalParser } from '@/lib/document/hierarchy-parser';
+import { AdobeEmbeddingProcessor } from '@/lib/pdf/adobe-embedding-processor';
+import { AdobePDFExtractor } from '@/lib/pdf/adobe-extractor';
 
 // Database connection
 // biome-ignore lint: Forbidden non-null assertion.
@@ -29,6 +31,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const files = formData.getAll('files') as File[];
     const chatId = formData.get('chatId') as string;
+    const useAdobeExtract = formData.get('useAdobeExtract') === 'true'; // Allow enabling Adobe extraction
 
     if (!chatId) {
       return NextResponse.json({ error: 'Chat ID is required' }, { status: 400 });
@@ -81,19 +84,19 @@ export async function POST(request: NextRequest) {
           updatedAt: new Date(),
         });
 
-        console.log(`✅ Document uploaded: ${file.name} -> ${documentId}`);
-
-        // Start background processing for NotebookLM-style document understanding
-        processDocumentInBackground(documentId, fileBuffer, file.name, chatId);
+        // Process document in background with Adobe enhancement
+        processDocumentInBackground(documentId, fileBuffer, filename, chatId, useAdobeExtract);
 
         results.push({
+          documentId,
           filename: file.name,
           status: 'uploaded',
-          documentId,
           url,
+          useAdobeExtract: useAdobeExtract && AdobePDFExtractor.isAvailable(),
         });
+
       } catch (error) {
-        console.error(`Error uploading ${file.name}:`, error);
+        console.error(`Error processing file ${file.name}:`, error);
         results.push({
           filename: file.name,
           status: 'error',
@@ -103,8 +106,9 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ results });
+
   } catch (error) {
-    console.error('Upload error:', error);
+    console.error('Upload API error:', error);
     return NextResponse.json(
       { error: 'Failed to upload files' },
       { status: 500 }
@@ -113,40 +117,43 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * NOTEBOOKLM-STYLE DOCUMENT PROCESSING
- * Focuses on content understanding, classification, and embedding generation
- * No visual element extraction to avoid database conflicts
+ * ENHANCED DOCUMENT PROCESSING WITH ADOBE INTEGRATION
+ * Combines existing NotebookLM-style processing with Adobe PDF Extract API
+ * for superior information extraction and embedding generation
  */
 async function processDocumentInBackground(
   documentId: string,
   fileBuffer: Buffer,
   filename: string,
-  chatId: string
+  chatId: string,
+  useAdobeExtract: boolean = false
 ) {
   try {
-    console.log(`🚀 Starting NotebookLM-style processing for document ${documentId} (${filename})`);
+    console.log(`🚀 Starting enhanced document processing for ${documentId} (${filename})`);
+    console.log(`📊 Adobe Extract enabled: ${useAdobeExtract && AdobePDFExtractor.isAvailable()}`);
     
-            // Update status to 'processing'
-        await db
-          .update(projectDocument)
-          .set({ 
-            uploadStatus: 'processing',
-            updatedAt: new Date(),
-          })
-          .where(eq(projectDocument.id, documentId));
+    // Update status to 'processing'
+    await db
+      .update(projectDocument)
+      .set({ 
+        uploadStatus: 'processing',
+        updatedAt: new Date(),
+      })
+      .where(eq(projectDocument.id, documentId));
 
     console.log(`📊 Updated document ${documentId} status to 'processing'`);
 
-    // Process the PDF for text and basic info only
+    // Process the PDF with Adobe extraction if enabled
     const processingResult = await PDFProcessor.processPDF(
       fileBuffer,
       filename,
-      chatId
+      chatId,
+      useAdobeExtract && AdobePDFExtractor.isAvailable() // Pass Adobe flag
     );
 
     console.log(`📄 PDF processing completed for document ${documentId}. Pages: ${processingResult.pages.length}`);
 
-    // Save processed pages to database (simplified - no visual elements)
+    // Save processed pages to database
     const pageInserts = processingResult.pages.map((page) => ({
       id: generateUUID(),
       documentId,
@@ -161,21 +168,30 @@ async function processDocumentInBackground(
     const insertedPages = await db.insert(documentPage).values(pageInserts).returning();
     console.log(`💾 Saved ${insertedPages.length} pages for document ${documentId}`);
 
-    // NOTEBOOKLM WORKFLOW: Classification and Embedding Generation
-    // Generate embeddings for semantic search (core NotebookLM functionality)
+    // ENHANCED EMBEDDING GENERATION with Adobe Integration
     for (let i = 0; i < processingResult.pages.length; i++) {
       const page = processingResult.pages[i];
       const dbPage = insertedPages[i];
 
-      console.log(`🧠 Processing page ${page.pageNumber} for embeddings...`);
-      await generateEmbeddingsForPage(dbPage.id, page, chatId);
+      console.log(`🧠 Processing page ${page.pageNumber} for enhanced embeddings...`);
+      
+      // Check if this page has Adobe extracted data
+      const hasAdobeData = page.tables || page.figures || page.documentStructure;
+      
+      if (hasAdobeData && useAdobeExtract) {
+        console.log(`🚀 Using Adobe-enhanced embedding generation for page ${page.pageNumber}`);
+        await generateAdobeEnhancedEmbeddings(dbPage.id, page, chatId, documentId);
+      } else {
+        console.log(`📄 Using standard embedding generation for page ${page.pageNumber}`);
+        await generateEmbeddingsForPage(dbPage.id, page, chatId);
+      }
     }
 
-    // Classify the document using AI (NotebookLM-style intelligence)
-    console.log(`🤖 Starting document classification for ${documentId}...`);
+    // Document classification and hierarchy processing
     await classifyDocument(documentId, processingResult.pages, insertedPages);
+    await processDocumentHierarchy(documentId, processingResult);
 
-    // Update status to 'ready'
+    // Mark document as ready
     await db
       .update(projectDocument)
       .set({ 
@@ -184,14 +200,12 @@ async function processDocumentInBackground(
       })
       .where(eq(projectDocument.id, documentId));
 
-    console.log(`✅ NotebookLM processing completed for document ${documentId} (${filename}) - Status: READY`);
+    console.log(`✅ Document processing completed for ${documentId}`);
 
   } catch (error) {
-    console.error(`❌ Error processing document ${documentId} (${filename}):`, error);
-    console.error(`❌ Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
+    console.error(`❌ Document processing failed for ${documentId}:`, error);
     
-    // Update status to 'failed'
-    try {
+    // Mark document as failed
     await db
       .update(projectDocument)
       .set({ 
@@ -199,10 +213,6 @@ async function processDocumentInBackground(
         updatedAt: new Date(),
       })
       .where(eq(projectDocument.id, documentId));
-      console.log(`📊 Updated document ${documentId} status to 'failed'`);
-    } catch (updateError) {
-      console.error(`❌ Failed to update document status to 'failed' for ${documentId}:`, updateError);
-    }
   }
 }
 
@@ -550,6 +560,330 @@ async function classifyDocument(
   }
 }
 
+/**
+ * Process document hierarchy (e.g., tables, figures, sections)
+ * This function is a placeholder and would require a more robust implementation
+ * based on the actual document structure and embedding types.
+ */
+async function processDocumentHierarchy(
+  documentId: string,
+  processingResult: any
+) {
+  try {
+    console.log(`🔗 Processing document hierarchy for ${documentId}`);
+
+    // Placeholder for hierarchy processing logic
+    // This would involve iterating through the processed pages and their embeddings
+    // to identify and group related information (e.g., tables, figures, sections)
+    // based on their metadata and embeddings.
+    // For now, we'll just log the hierarchy.
+
+    // Example: Grouping tables by page and embedding type
+    const groupedTables: { [key: string]: any[] } = {};
+    for (const page of processingResult.pages) {
+      if (page.tables && page.tables.length > 0) {
+        groupedTables[page.pageNumber] = page.tables.map(table => ({
+          pageNumber: page.pageNumber,
+          tableIndex: table.tableIndex,
+          csvData: table.csvData,
+          bounds: table.bounds,
+          embeddingType: 'table'
+        }));
+      }
+    }
+    console.log(`📊 Grouped ${Object.values(groupedTables).flat().length} tables by page.`);
+
+    // Example: Grouping figures by page and embedding type
+    const groupedFigures: { [key: string]: any[] } = {};
+    for (const page of processingResult.pages) {
+      if (page.figures && page.figures.length > 0) {
+        groupedFigures[page.pageNumber] = page.figures.map(figure => ({
+          pageNumber: page.pageNumber,
+          figureIndex: figure.figureIndex,
+          type: figure.type,
+          caption: figure.caption,
+          bounds: figure.bounds,
+          embeddingType: 'figure'
+        }));
+      }
+    }
+    console.log(`🖼️ Grouped ${Object.values(groupedFigures).flat().length} figures by page.`);
+
+    // Example: Grouping text chunks by page and embedding type
+    const groupedTextChunks: { [key: string]: any[] } = {};
+    for (const page of processingResult.pages) {
+      if (page.documentStructure && page.documentStructure.length > 0) {
+        groupedTextChunks[page.pageNumber] = page.documentStructure.map(node => ({
+          pageNumber: page.pageNumber,
+          path: node.path,
+          text: node.text,
+          bounds: node.bounds,
+          embeddingType: 'text'
+        }));
+      }
+    }
+    console.log(`📝 Grouped ${Object.values(groupedTextChunks).flat().length} text chunks by page.`);
+
+    // In a real application, you would save these hierarchies to the database
+    // using the schema defined in @/lib/db/schema.ts
+    // For example:
+    // await db.insert(documentHierarchy).values({
+    //   id: generateUUID(),
+    //   documentId: documentId,
+    //   type: 'table',
+    //   pageNumber: 1,
+    //   embeddingId: 'some_embedding_id', // This would be the ID of the multimodal embedding
+    //   parentId: null, // For hierarchical structure
+    //   metadata: {
+    //     tableIndex: 0,
+    //     csvData: '...',
+    //     bounds: { x: 0, y: 0, width: 100, height: 50 }
+    //   }
+    // });
+
+  } catch (error) {
+    console.error(`❌ Failed to process document hierarchy for ${documentId}:`, error);
+  }
+}
+
+/**
+ * Generate enhanced embeddings using Adobe extracted data
+ * This function saves Adobe data to dedicated tables and creates enriched embeddings
+ */
+async function generateAdobeEnhancedEmbeddings(
+  pageId: string, 
+  page: any, 
+  chatId: string, 
+  documentId: string
+): Promise<void> {
+  console.log(`🚀 Starting Adobe-enhanced embedding generation for page ${page.pageNumber}`);
+  
+  try {
+    // Import Google's Generative AI SDK
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!);
+    const embeddingModel = genAI.getGenerativeModel({ model: 'text-embedding-004' });
+
+    // First, save Adobe extracted data to dedicated tables
+    if (page.tables && page.tables.length > 0) {
+      console.log(`📊 Saving ${page.tables.length} Adobe tables to database`);
+      
+      for (const table of page.tables as any[]) {
+        // Save table to adobe_extracted_tables
+        const tableId = generateUUID();
+        await db.insert(adobeExtractedTables).values({
+          id: tableId,
+          pageId: pageId,
+          tableIndex: table.tableIndex || 0,
+          bounds: table.bounds || null,
+          csvData: table.csvData || null,
+          xlsxUrl: table.xlsxUrl || null,
+          pngUrl: table.pngUrl || null,
+          metadata: table.metadata || null,
+          createdAt: new Date()
+        });
+
+        // Process table data for embeddings
+        if (table.csvData) {
+          const rows = table.csvData.split('\n').filter((row: string) => row.trim());
+          if (rows.length > 1) {
+            const headers = rows[0].split(',').map((h: string) => h.trim().replace(/"/g, ''));
+            
+            // Create embeddings for each data row
+            for (let i = 1; i < rows.length; i++) {
+              const cells = rows[i].split(',').map((c: string) => c.trim().replace(/"/g, ''));
+              
+              // Create natural language description
+              const rowDescription = `Table data: ${headers.map((header: string, j: number) => `${header}: ${cells[j] || 'N/A'}`).join(', ')} (Page ${page.pageNumber})`;
+              
+              try {
+                // Generate embedding for this table row
+                const embeddingResult = await embeddingModel.embedContent(rowDescription);
+                const embedding = embeddingResult.embedding.values;
+
+                // Store table embedding in dedicated table
+                await db.insert(tableEmbeddings).values({
+                  id: generateUUID(),
+                  adobeTableId: tableId,
+                  rowIndex: i - 1,
+                  columnName: headers.join(','),
+                  cellValue: cells.join(','),
+                  rowDescription: rowDescription,
+                  embedding: JSON.stringify(embedding),
+                  createdAt: new Date()
+                });
+
+                // Also store in multimodal embeddings for unified search
+                await db.insert(multimodalEmbedding).values({
+                  id: generateUUID(),
+                  pageId: pageId,
+                  contentType: 'textual',
+                  chunkDescription: rowDescription,
+                  embedding: JSON.stringify(embedding),
+                  boundingBox: table.bounds,
+                  metadata: {
+                    pageNumber: page.pageNumber,
+                    source: 'adobe_table_extraction',
+                    tableIndex: table.tableIndex,
+                    rowIndex: i - 1,
+                    headers: headers,
+                    embeddingDimensions: embedding.length,
+                    chatId: chatId,
+                    extractionMethod: 'adobe_pdf_extract'
+                  }
+                });
+
+                console.log(`💾 Saved Adobe table embedding: Row ${i}/${rows.length} - "${rowDescription.substring(0, 80)}..."`);
+
+              } catch (embeddingError) {
+                console.error(`❌ Failed to generate table embedding for row ${i}:`, embeddingError);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Process figures
+    if (page.figures && page.figures.length > 0) {
+      console.log(`🖼️ Saving ${page.figures.length} Adobe figures to database`);
+      
+      for (const figure of page.figures as any[]) {
+        // Save figure to extracted_figures table
+        const figureId = generateUUID();
+        await db.insert(extractedFigures).values({
+          id: figureId,
+          pageId: pageId,
+          figureType: figure.type || 'other',
+          imageUrl: figure.imageUrl || null,
+          thumbnailUrl: figure.thumbnailUrl || null,
+          bounds: figure.bounds || null,
+          caption: figure.caption || null,
+          confidence: figure.confidence || null,
+          adobeMetadata: figure.metadata || null,
+          createdAt: new Date()
+        });
+
+        // Create embedding for figure
+        const figureDescription = `Figure: ${figure.caption || 'No caption'} (Type: ${figure.type || 'unknown'}, Page ${page.pageNumber})`;
+        
+        try {
+          const embeddingResult = await embeddingModel.embedContent(figureDescription);
+          const embedding = embeddingResult.embedding.values;
+
+          // Store figure embedding in dedicated table
+          await db.insert(figureEmbeddings).values({
+            id: generateUUID(),
+            adobeFigureId: figureId,
+            caption: figure.caption || null,
+            description: figureDescription,
+            spatialElements: figure.spatialElements || null,
+            embedding: JSON.stringify(embedding),
+            createdAt: new Date()
+          });
+
+          // Also store in multimodal embeddings for unified search
+          await db.insert(multimodalEmbedding).values({
+            id: generateUUID(),
+            pageId: pageId,
+            contentType: 'visual',
+            chunkDescription: figureDescription,
+            embedding: JSON.stringify(embedding),
+            boundingBox: figure.bounds,
+            metadata: {
+              pageNumber: page.pageNumber,
+              source: 'adobe_figure_extraction',
+              figureType: figure.type,
+              embeddingDimensions: embedding.length,
+              chatId: chatId,
+              extractionMethod: 'adobe_pdf_extract'
+            }
+          });
+
+          console.log(`💾 Saved Adobe figure embedding: "${figureDescription.substring(0, 80)}..."`);
+
+        } catch (embeddingError) {
+          console.error(`❌ Failed to generate figure embedding:`, embeddingError);
+        }
+      }
+    }
+
+    // Process document structure and text elements
+    if (page.documentStructure && page.documentStructure.length > 0) {
+      console.log(`📝 Saving ${page.documentStructure.length} Adobe text elements to database`);
+      
+      for (const node of page.documentStructure) {
+        if (node.text && node.text.trim()) {
+          // Save text element to adobe_text_elements
+          await db.insert(adobeTextElements).values({
+            id: generateUUID(),
+            pageId: pageId,
+            textContent: node.text,
+            coordinates: node.bounds || {}, // Required field, using empty object as fallback
+            fontInfo: node.fontInfo || null,
+            stylingInfo: node.stylingInfo || null,
+            pathInfo: node.path || null,
+            createdAt: new Date()
+          });
+
+          // Save document structure to adobe_document_structure
+          await db.insert(adobeDocumentStructure).values({
+            id: generateUUID(),
+            documentId: documentId,
+            elementType: node.elementType || 'text',
+            path: node.path || null,
+            bounds: node.bounds || null,
+            pageNumber: page.pageNumber,
+            hierarchyLevel: node.hierarchyLevel || 0,
+            parentId: null, // Would need to implement hierarchy tracking
+            textContent: node.text,
+            createdAt: new Date()
+          });
+
+          // Create enhanced text embedding
+          const enhancedDescription = `${node.elementType || 'Text'}: ${node.text} (Page ${page.pageNumber}, Path: ${node.path || 'unknown'})`;
+          
+          try {
+            const embeddingResult = await embeddingModel.embedContent(enhancedDescription);
+            const embedding = embeddingResult.embedding.values;
+
+            await db.insert(multimodalEmbedding).values({
+              id: generateUUID(),
+              pageId: pageId,
+              contentType: 'textual',
+              chunkDescription: enhancedDescription,
+              embedding: JSON.stringify(embedding),
+              boundingBox: node.bounds,
+              metadata: {
+                pageNumber: page.pageNumber,
+                source: 'adobe_text_extraction',
+                elementType: node.elementType,
+                path: node.path,
+                embeddingDimensions: embedding.length,
+                chatId: chatId,
+                extractionMethod: 'adobe_pdf_extract'
+              }
+            });
+
+            console.log(`💾 Saved Adobe text embedding: "${enhancedDescription.substring(0, 80)}..."`);
+
+          } catch (embeddingError) {
+            console.error(`❌ Failed to generate text embedding:`, embeddingError);
+          }
+        }
+      }
+    }
+
+    console.log(`✅ Completed Adobe-enhanced embedding generation for page ${page.pageNumber}`);
+
+  } catch (error) {
+    console.error(`❌ Failed Adobe-enhanced embedding generation for page ${page.pageNumber}:`, error);
+    // Fallback to standard embedding generation
+    console.log(`🔄 Falling back to standard embedding generation for page ${page.pageNumber}`);
+    await generateEmbeddingsForPage(pageId, page, chatId);
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = await auth();
@@ -581,46 +915,46 @@ export async function GET(request: NextRequest) {
 
     console.log(`📊 PDF Sidebar - Raw query returned ${documentsWithPages.length} rows`);
 
-         // Get page information for each document
-     const documentsWithPageInfo = await Promise.all(
-       documentsWithPages.map(async (doc) => {
-         try {
-           // Get pages for this document
-           const pages = await db
-             .select()
-             .from(documentPage)
-             .where(eq(documentPage.documentId, doc.id));
+    // Get page information for each document
+    const documentsWithPageInfo = await Promise.all(
+      documentsWithPages.map(async (doc) => {
+        try {
+          // Get pages for this document
+          const pages = await db
+            .select()
+            .from(documentPage)
+            .where(eq(documentPage.documentId, doc.id));
 
-           // Set thumbnail from first page if available
-           let thumbnailUrl = '';
-           if (pages.length > 0 && pages[0].thumbnailUrl) {
-             thumbnailUrl = pages[0].thumbnailUrl;
-             console.log(`🖼️ PDF Sidebar - Set thumbnail for ${doc.originalFilename}: ${thumbnailUrl}`);
-           }
+          // Set thumbnail from first page if available
+          let thumbnailUrl = '';
+          if (pages.length > 0 && pages[0].thumbnailUrl) {
+            thumbnailUrl = pages[0].thumbnailUrl;
+            console.log(`🖼️ PDF Sidebar - Set thumbnail for ${doc.originalFilename}: ${thumbnailUrl}`);
+          }
 
-           return {
-             id: doc.id,
-             originalFilename: doc.originalFilename,
-             uploadStatus: doc.uploadStatus,
-             createdAt: doc.createdAt,
-             fileUrl: doc.fileUrl,
-             pageCount: pages.length,
-             thumbnailUrl,
-           };
-         } catch (error) {
-           console.error(`Error fetching pages for document ${doc.id}:`, error);
-           return {
-             id: doc.id,
-             originalFilename: doc.originalFilename,
-             uploadStatus: doc.uploadStatus,
-             createdAt: doc.createdAt,
-             fileUrl: doc.fileUrl,
-             pageCount: 0,
-             thumbnailUrl: '',
-           };
-         }
-       })
-     );
+          return {
+            id: doc.id,
+            originalFilename: doc.originalFilename,
+            uploadStatus: doc.uploadStatus,
+            createdAt: doc.createdAt,
+            fileUrl: doc.fileUrl,
+            pageCount: pages.length,
+            thumbnailUrl,
+          };
+        } catch (error) {
+          console.error(`Error fetching pages for document ${doc.id}:`, error);
+          return {
+            id: doc.id,
+            originalFilename: doc.originalFilename,
+            uploadStatus: doc.uploadStatus,
+            createdAt: doc.createdAt,
+            fileUrl: doc.fileUrl,
+            pageCount: 0,
+            thumbnailUrl: '',
+          };
+        }
+      })
+    );
 
     console.log(`📋 PDF Sidebar - Received documents: ${documentsWithPageInfo.length}`);
     
@@ -638,4 +972,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}

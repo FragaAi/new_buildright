@@ -217,6 +217,10 @@ export function PDFSidebar({ chatId }: PDFSidebarProps) {
     const formData = new FormData();
     formData.append('chatId', chatId);
     
+    // Enable Adobe PDF Extract API for enhanced processing
+    // This will use Adobe extraction if credentials are configured
+    formData.append('useAdobeExtract', 'true');
+    
     // Add valid PDF files only
     const validFiles = fileArray.filter(file => file.type === 'application/pdf');
     for (const file of validFiles) {

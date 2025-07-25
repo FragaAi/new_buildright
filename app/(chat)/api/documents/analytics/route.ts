@@ -9,7 +9,12 @@ import {
   visualElement, 
   measurement, 
   multimodalEmbedding,
-  complianceCheck 
+  complianceCheck,
+  adobeExtractedTables,
+  extractedFigures,
+  adobeTextElements,
+  tableEmbeddings,
+  figureEmbeddings
 } from '@/lib/db/schema';
 
 // Database connection
@@ -165,23 +170,152 @@ export async function GET(request: NextRequest) {
       .orderBy(desc(visualElement.confidence), documentPage.pageNumber)
       .limit(50); // Limit for performance
 
-    // 7. Calculate summary statistics
+    // 7. ADOBE EXTRACTION ANALYTICS
+    console.log(`📊 ADOBE: Querying Adobe extraction data for chat ${chatId}`);
+    
+    // Adobe Tables Analytics
+    const adobeTableStats = await db
+      .select({
+        count: count(adobeExtractedTables.id),
+        withCsvData: count(adobeExtractedTables.csvData),
+      })
+      .from(adobeExtractedTables)
+      .leftJoin(documentPage, eq(adobeExtractedTables.pageId, documentPage.id))
+      .leftJoin(projectDocument, eq(documentPage.documentId, projectDocument.id))
+      .where(documentId 
+        ? and(eq(projectDocument.chatId, chatId), eq(projectDocument.id, documentId))
+        : eq(projectDocument.chatId, chatId)
+      );
+
+    // Adobe Figures Analytics  
+    const adobeFigureStats = await db
+      .select({
+        count: count(extractedFigures.id),
+        withCaptions: count(extractedFigures.caption),
+        byType: extractedFigures.figureType,
+        typeCount: count(extractedFigures.figureType),
+      })
+      .from(extractedFigures)
+      .leftJoin(documentPage, eq(extractedFigures.pageId, documentPage.id))
+      .leftJoin(projectDocument, eq(documentPage.documentId, projectDocument.id))
+      .where(documentId 
+        ? and(eq(projectDocument.chatId, chatId), eq(projectDocument.id, documentId))
+        : eq(projectDocument.chatId, chatId)
+      )
+      .groupBy(extractedFigures.figureType);
+
+    // Adobe Text Elements Analytics
+    const adobeTextStats = await db
+      .select({
+        count: count(adobeTextElements.id),
+        withCoordinates: count(adobeTextElements.coordinates),
+        avgTextLength: count(adobeTextElements.textContent), // Could be improved with actual length calc
+      })
+      .from(adobeTextElements)
+      .leftJoin(documentPage, eq(adobeTextElements.pageId, documentPage.id))
+      .leftJoin(projectDocument, eq(documentPage.documentId, projectDocument.id))
+      .where(documentId 
+        ? and(eq(projectDocument.chatId, chatId), eq(projectDocument.id, documentId))
+        : eq(projectDocument.chatId, chatId)
+      );
+
+    // Adobe Embeddings Analytics
+    const tableEmbeddingCount = await db
+      .select({
+        count: count(tableEmbeddings.id),
+      })
+      .from(tableEmbeddings);
+
+    const figureEmbeddingCount = await db
+      .select({
+        count: count(figureEmbeddings.id),
+      })
+      .from(figureEmbeddings);
+
+    const adobeEmbeddingStats = {
+      tableEmbeddings: Number(tableEmbeddingCount[0]?.count) || 0,
+      figureEmbeddings: Number(figureEmbeddingCount[0]?.count) || 0,
+    };
+
+    // Enhanced Multimodal Embeddings (Adobe vs Standard)
+    const enhancedEmbeddingStats = await db
+      .select({
+        totalEmbeddings: count(multimodalEmbedding.id),
+      })
+      .from(multimodalEmbedding)
+      .leftJoin(documentPage, eq(multimodalEmbedding.pageId, documentPage.id))
+      .leftJoin(projectDocument, eq(documentPage.documentId, projectDocument.id))
+      .where(documentId 
+        ? and(eq(projectDocument.chatId, chatId), eq(projectDocument.id, documentId))
+        : eq(projectDocument.chatId, chatId)
+      );
+
+    // Extract measurements from Adobe text elements (count numeric patterns)
+    const adobeMeasurements = await db
+      .select({
+        textContent: adobeTextElements.textContent,
+        pathInfo: adobeTextElements.pathInfo,
+      })
+      .from(adobeTextElements)
+      .leftJoin(documentPage, eq(adobeTextElements.pageId, documentPage.id))
+      .leftJoin(projectDocument, eq(documentPage.documentId, projectDocument.id))
+      .where(documentId 
+        ? and(eq(projectDocument.chatId, chatId), eq(projectDocument.id, documentId))
+        : eq(projectDocument.chatId, chatId)
+      );
+
+    // Count measurements from extracted text
+    const measurementPatterns = /(\d+[\.\-\']?\d*)\s*(sf|sq\.?ft\.?|ft\.?|'|"|inches?|feet|meters?|m\.?)/gi;
+    const extractedMeasurements = adobeMeasurements.flatMap(item => {
+      if (!item.textContent) return [];
+      const matches = item.textContent.match(measurementPatterns) || [];
+      return matches.map(match => ({
+        measurement: match,
+        context: item.textContent.substring(0, 100),
+        path: item.pathInfo
+      }));
+    });
+
+    console.log(`📊 ADOBE: Found ${adobeTableStats[0]?.count || 0} tables, ${adobeFigureStats.reduce((sum, stat) => sum + Number(stat.typeCount), 0)} figures, ${adobeTextStats[0]?.count || 0} text elements`);
+
+    // 8. Calculate enhanced summary statistics
     const totalPages = pagesWithData.filter(p => p.pageId).length;
     const totalVisualElements = detailedVisualElements.length;
     const totalEmbeddings = embeddingStats.reduce((sum, stat) => sum + Number(stat.count), 0);
     const totalMeasurements = measurementStats.reduce((sum, stat) => sum + Number(stat.count), 0);
 
+    // Adobe data totals
+    const totalAdobeTables = Number(adobeTableStats[0]?.count) || 0;
+    const totalAdobeFigures = adobeFigureStats.reduce((sum, stat) => sum + Number(stat.typeCount), 0);
+    const totalAdobeTextElements = Number(adobeTextStats[0]?.count) || 0;
+    const totalAdobeElements = totalAdobeTables + totalAdobeFigures + totalAdobeTextElements;
+    const totalExtractedMeasurements = extractedMeasurements.length;
+
+    // Processing quality assessment
+    const hasAdobeData = totalAdobeElements > 0;
+    const adobeDataQuality = hasAdobeData ? 
+      (totalAdobeTables > 0 ? 'Excellent' : 'Good') : 
+      (totalVisualElements > 0 ? 'Partial' : 'Basic');
+
     const summary = {
       totalDocuments: documents.length,
       totalPages,
       totalVisualElements,
-      totalMeasurements,
+      totalMeasurements: totalMeasurements + totalExtractedMeasurements,
       totalEmbeddings,
+      // Adobe-specific metrics
+      totalAdobeElements,
+      totalAdobeTables,
+      totalAdobeFigures, 
+      totalAdobeTextElements,
+      totalExtractedMeasurements,
       processingComplete: documents.every(d => d.uploadStatus === 'ready'),
-      extractionQuality: totalVisualElements > 0 ? 'Good' : totalPages > 0 ? 'Partial' : 'None',
+      extractionQuality: adobeDataQuality,
+      processingMethod: hasAdobeData ? 'Adobe Enhanced' : 'Standard',
+      dataRichness: totalAdobeElements > (totalVisualElements * 2) ? 'High' : 'Standard'
     };
 
-    console.log(`📈 Analytics Summary: ${summary.totalDocuments} docs, ${summary.totalPages} pages, ${summary.totalVisualElements} elements`);
+    console.log(`📈 Analytics Summary: ${summary.totalDocuments} docs, ${summary.totalPages} pages, ${summary.totalAdobeElements} Adobe elements`);
 
     return NextResponse.json({
       summary,
@@ -191,6 +325,13 @@ export async function GET(request: NextRequest) {
       measurementStats,
       embeddingStats,
       detailedVisualElements,
+      // Adobe analytics data
+      adobeTableStats: adobeTableStats[0] || { count: 0, withCsvData: 0 },
+      adobeFigureStats,
+      adobeTextStats: adobeTextStats[0] || { count: 0, withCoordinates: 0 },
+      adobeEmbeddingStats,
+      enhancedEmbeddingStats: enhancedEmbeddingStats[0] || { totalEmbeddings: 0 },
+      extractedMeasurements: extractedMeasurements.slice(0, 20), // First 20 for preview
       chatId,
       documentId,
     });
