@@ -582,7 +582,7 @@ async function processDocumentHierarchy(
     const groupedTables: { [key: string]: any[] } = {};
     for (const page of processingResult.pages) {
       if (page.tables && page.tables.length > 0) {
-        groupedTables[page.pageNumber] = page.tables.map(table => ({
+        groupedTables[page.pageNumber] = page.tables.map((table: any) => ({
           pageNumber: page.pageNumber,
           tableIndex: table.tableIndex,
           csvData: table.csvData,
@@ -597,7 +597,7 @@ async function processDocumentHierarchy(
     const groupedFigures: { [key: string]: any[] } = {};
     for (const page of processingResult.pages) {
       if (page.figures && page.figures.length > 0) {
-        groupedFigures[page.pageNumber] = page.figures.map(figure => ({
+        groupedFigures[page.pageNumber] = page.figures.map((figure: any) => ({
           pageNumber: page.pageNumber,
           figureIndex: figure.figureIndex,
           type: figure.type,
@@ -613,7 +613,7 @@ async function processDocumentHierarchy(
     const groupedTextChunks: { [key: string]: any[] } = {};
     for (const page of processingResult.pages) {
       if (page.documentStructure && page.documentStructure.length > 0) {
-        groupedTextChunks[page.pageNumber] = page.documentStructure.map(node => ({
+        groupedTextChunks[page.pageNumber] = page.documentStructure.map((node: any) => ({
           pageNumber: page.pageNumber,
           path: node.path,
           text: node.text,
