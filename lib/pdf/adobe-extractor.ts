@@ -485,3 +485,5 @@ export class AdobePDFExtractor {
     };
   }
 }
+
+// end of file

@@ -576,3 +576,5 @@ export function AnalyticsDashboard({ chatId, selectedDocumentId }: AnalyticsDash
     </div>
   );
 } 
+
+// end of file

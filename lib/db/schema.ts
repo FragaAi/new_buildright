@@ -547,3 +547,5 @@ export const queryContext = pgTable('query_context', {
 });
 
 export type QueryContext = InferSelectModel<typeof queryContext>;
+
+// end of file

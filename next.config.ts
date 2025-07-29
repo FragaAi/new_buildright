@@ -60,3 +60,5 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+
+// end of file
